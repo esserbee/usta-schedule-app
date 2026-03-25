@@ -12,34 +12,78 @@ HTML_TEMPLATE = """<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>USTA Team Schedule Combiner</title>
+  <title>USTA NorCal League Schedule Organizer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 2rem; max-width: 800px; margin: 0 auto; background: #f7f6f2; color: #222; }
-    h1 { font-size: 1.75rem; margin-bottom: 1rem; }
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 2rem; max-width: 1000px; margin: 0 auto; background: #f7f6f2; color: #222; }
+    h1 { font-size: 1.9rem; margin-bottom: 0.5rem; }
+    p { max-width: 70ch; }
     label { font-weight: 600; display: block; margin-bottom: 0.25rem; }
     textarea { width: 100%; min-height: 140px; padding: 0.75rem; border-radius: 8px; border: 1px solid #ccc; font-family: monospace; font-size: 0.9rem; }
-    button { margin-top: 1rem; padding: 0.75rem 1.25rem; border-radius: 999px; border: none; background: #01696f; color: #fff; font-weight: 600; cursor: pointer; }
+    button { margin-top: 1rem; padding: 0.6rem 1.2rem; border-radius: 999px; border: none; background: #01696f; color: #fff; font-weight: 600; cursor: pointer; }
     button:hover { background: #0c4e54; }
     .help { font-size: 0.85rem; color: #666; margin-top: 0.25rem; }
     .status { margin-top: 1rem; font-size: 0.9rem; color: #444; }
     .error { color: #a12c2c; }
     .example { font-size: 0.85rem; margin-top: 0.5rem; }
     code { background: #f0efea; padding: 0.1rem 0.3rem; border-radius: 4px; }
+    .results { margin-top: 2rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.9rem; }
+    th, td { border: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; }
+    th { background: #eceae3; font-weight: 700; }
+    tr.conflict { background: #fff7c2; }
+    .actions { margin-top: 1rem; }
   </style>
 </head>
 <body>
-  <h1>USTA Team Schedule Combiner</h1>
-  <p>Paste one or more USTA NorCal team info page URLs (one per line). The app will fetch each schedule and generate a combined Excel file with conflicts highlighted.</p>
+  <h1>USTA NorCal League Schedule Organizer</h1>
+  <p>Paste one or more USTA NorCal team info page URLs (one per line). The app will fetch each schedule, show a combined table, and let you download an Excel file with conflicts highlighted.</p>
   <form method="post" action="/generate">
     <label for="urls">Team info URLs</label>
     <textarea id="urls" name="urls" placeholder="https://leagues.ustanorcal.com/teaminfo.asp?id=109510
-https://leagues.ustanorcal.com/teaminfo.asp?id=109621"></textarea>
+https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</textarea>
     <div class="help">Use the full <code>teaminfo.asp?id=...</code> links. You can paste as many as you want.</div>
-    <button type="submit">Generate Excel Schedule</button>
+    <button type="submit">Generate Schedule</button>
   </form>
   {% if message %}
   <div class="status {% if error %}error{% endif %}">{{ message }}</div>
+  {% endif %}
+
+  {% if schedule %}
+  <div class="results">
+    <h2>Combined schedule</h2>
+    <p>Rows highlighted in yellow are days where you have more than one match scheduled.</p>
+    <table class="schedule-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Team name</th>
+          <th>Match time</th>
+          <th>All start times / lanes</th>
+          <th>Opponent team</th>
+          <th>Home/Away</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in schedule %}
+        <tr class="{% if row.Is_conflict %}conflict{% endif %}">
+          <td>{{ row.Date_display }}</td>
+          <td>{{ row['Team name'] }}</td>
+          <td>{{ row['Match time'] }}</td>
+          <td>{{ row['All start times / lanes'] }}</td>
+          <td>{{ row['Opponent team'] }}</td>
+          <td>{{ row['Home/Away'] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="actions">
+      <form method="post" action="/download">
+        <input type="hidden" name="urls" value="{{ urls_value | e }}">
+        <button type="submit">Download Excel Schedule</button>
+      </form>
+    </div>
+  </div>
   {% endif %}
 </body>
 </html>
@@ -126,32 +170,23 @@ def parse_schedule_html(html, fallback_name):
 
 @app.route('/', methods=['GET'])
 def index():
-    return render_template_string(HTML_TEMPLATE)
+    return render_template_string(HTML_TEMPLATE, urls_value='', schedule=None, message=None, error=False)
 
 
-@app.route('/generate', methods=['POST'])
-def generate():
-    urls_raw = request.form.get('urls', '')
-    urls = [u.strip() for u in urls_raw.splitlines() if u.strip()]
-    if not urls:
-        return render_template_string(HTML_TEMPLATE, message="Please paste at least one URL.", error=True)
-
+def build_schedule(urls):
     all_rows = []
     for url in urls:
-        try:
-            resp = requests.get(url, timeout=15)
-            resp.raise_for_status()
-        except Exception as e:
-            return render_template_string(HTML_TEMPLATE, message=f"Error fetching {url}: {e}", error=True)
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
 
         fallback_name = url
         rows = parse_schedule_html(resp.text, fallback_name)
         if not rows:
-            return render_template_string(HTML_TEMPLATE, message=f"Could not find a schedule table on {url}.", error=True)
+            raise ValueError(f"Could not find a schedule table on {url}.")
         all_rows.extend(rows)
 
     if not all_rows:
-        return render_template_string(HTML_TEMPLATE, message="No matches found in the provided pages.", error=True)
+        raise ValueError("No matches found in the provided pages.")
 
     df = pd.DataFrame(all_rows)
     df['Date'] = pd.to_datetime(df['Date_raw'], format='%m/%d/%y', errors='coerce')
@@ -159,15 +194,61 @@ def generate():
 
     out_df = df[['Date', 'Team name', 'Match time', 'All start times / lanes', 'Opponent team', 'Home/Away']].copy()
 
+    # Mark conflicting dates
+    counts = out_df['Date'].value_counts(dropna=False)
+    conflict_dates = set(counts[counts > 1].index)
+    out_df['Is_conflict'] = out_df['Date'].isin(conflict_dates)
+
+    # Date display string
+    out_df['Date_display'] = out_df['Date'].dt.strftime('%b %-d')
+
+    return out_df
+
+
+@app.route('/generate', methods=['POST'])
+def generate():
+    urls_raw = request.form.get('urls', '')
+    urls = [u.strip() for u in urls_raw.splitlines() if u.strip()]
+    if not urls:
+        return render_template_string(HTML_TEMPLATE, message="Please paste at least one URL.", error=True, urls_value=urls_raw, schedule=None)
+
+    try:
+        out_df = build_schedule(urls)
+    except Exception as e:
+        return render_template_string(HTML_TEMPLATE, message=str(e), error=True, urls_value=urls_raw, schedule=None)
+
+    schedule = out_df.to_dict(orient='records')
+
+    return render_template_string(HTML_TEMPLATE, message=None, error=False, urls_value=urls_raw, schedule=schedule)
+
+
+@app.route('/download', methods=['POST'])
+def download():
+    urls_raw = request.form.get('urls', '')
+    urls = [u.strip() for u in urls_raw.splitlines() if u.strip()]
+    if not urls:
+        return render_template_string(HTML_TEMPLATE, message="Please paste at least one URL.", error=True, urls_value=urls_raw, schedule=None)
+
+    try:
+        out_df = build_schedule(urls)
+    except Exception as e:
+        return render_template_string(HTML_TEMPLATE, message=str(e), error=True, urls_value=urls_raw, schedule=None)
+
     # Write to in-memory Excel
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        out_df.to_excel(writer, index=False, sheet_name='Schedule')
+        out_df[['Date', 'Team name', 'Match time', 'All start times / lanes', 'Opponent team', 'Home/Away']].to_excel(writer, index=False, sheet_name='Schedule')
         wb = writer.book
         ws = writer.sheets['Schedule']
 
+        from openpyxl.styles import PatternFill, Font
+
+        # Make header row bold
+        header_font = Font(bold=True)
+        for col in range(1, ws.max_column + 1):
+            ws.cell(row=1, column=col).font = header_font
+
         # Format date column as "mmm d"
-        from openpyxl.styles import PatternFill
         for row in range(2, ws.max_row + 1):
             cell = ws.cell(row=row, column=1)
             if isinstance(cell.value, datetime):
