@@ -5,6 +5,7 @@ import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 from datetime import datetime
+from urllib.parse import urljoin
 
 app = Flask(__name__)
 
@@ -20,12 +21,12 @@ HTML_TEMPLATE = """<!doctype html>
     p { max-width: 70ch; }
     label { font-weight: 600; display: block; margin-bottom: 0.25rem; }
     textarea { width: 100%; min-height: 140px; padding: 0.75rem; border-radius: 8px; border: 1px solid #ccc; font-family: monospace; font-size: 0.9rem; }
+    input[type="url"] { width: 100%; padding: 0.6rem 0.75rem; border-radius: 8px; border: 1px solid #ccc; font-size: 0.9rem; margin-bottom: 0.5rem; }
     button { margin-top: 1rem; padding: 0.6rem 1.2rem; border-radius: 999px; border: none; background: #01696f; color: #fff; font-weight: 600; cursor: pointer; }
     button:hover { background: #0c4e54; }
     .help { font-size: 0.85rem; color: #666; margin-top: 0.25rem; }
     .status { margin-top: 1rem; font-size: 0.9rem; color: #444; }
     .error { color: #a12c2c; }
-    .example { font-size: 0.85rem; margin-top: 0.5rem; }
     code { background: #f0efea; padding: 0.1rem 0.3rem; border-radius: 4px; }
     .results { margin-top: 2rem; }
     table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.9rem; }
@@ -33,20 +34,51 @@ HTML_TEMPLATE = """<!doctype html>
     th { background: #eceae3; font-weight: 700; }
     tr.conflict { background: #fff7c2; }
     .actions { margin-top: 1rem; }
+    .team-list label { font-weight: 400; }
   </style>
 </head>
 <body>
   <h1>USTA NorCal League Schedule Organizer</h1>
-  <p>Paste one or more USTA NorCal team info page URLs (one per line). The app will fetch each schedule, show a combined table, and let you download an Excel file with conflicts highlighted.</p>
+  <p>Paste your USTA NorCal player profile URL to pick your current-year teams, or paste team info URLs directly. The app will fetch schedules, show a combined table, and let you download an Excel file with conflicts highlighted.</p>
+
   <form method="post" action="/generate">
-    <label for="urls">Team info URLs</label>
+    <label for="profile_url">Player profile URL (optional)</label>
+    <input type="url" id="profile_url" name="profile_url" placeholder="https://leagues.ustanorcal.com/...player..." value="{{ profile_url or '' }}">
+
+    <label for="urls">Team info URLs (optional)</label>
     <textarea id="urls" name="urls" placeholder="https://leagues.ustanorcal.com/teaminfo.asp?id=109510
 https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</textarea>
-    <div class="help">Use the full <code>teaminfo.asp?id=...</code> links. You can paste as many as you want.</div>
+    <div class="help">You can either select teams from your profile above, paste team URLs here, or do both.</div>
     <button type="submit">Generate Schedule</button>
   </form>
+
   {% if message %}
   <div class="status {% if error %}error{% endif %}">{{ message }}</div>
+  {% endif %}
+
+  {% if team_choices %}
+  <div class="results">
+    <h2>Select teams for {{ current_year }}</h2>
+    {% if filtered_to_year %}
+      <p>Showing teams detected for {{ current_year }} from your profile. Select which ones to include in the schedule.</p>
+    {% else %}
+      <p>These are the teams found on your profile. Select which ones to include in the schedule.</p>
+    {% endif %}
+    <form method="post" action="/generate">
+      <input type="hidden" name="profile_url" value="{{ profile_url | e }}">
+      <div class="team-list">
+      {% for t in team_choices %}
+        <div>
+          <label>
+            <input type="checkbox" name="team_urls" value="{{ t.url }}" checked>
+            {{ t.label }}{% if t.context %} — {{ t.context }}{% endif %}
+          </label>
+        </div>
+      {% endfor %}
+      </div>
+      <button type="submit">Build Schedule from Selected Teams</button>
+    </form>
+  </div>
   {% endif %}
 
   {% if schedule %}
@@ -168,9 +200,23 @@ def parse_schedule_html(html, fallback_name):
     return rows_out
 
 
-@app.route('/', methods=['GET'])
-def index():
-    return render_template_string(HTML_TEMPLATE, urls_value='', schedule=None, message=None, error=False)
+def parse_profile_for_teams(html, base_url):
+    """Extract team links from a player profile page.
+
+    Heuristic: look for anchors whose href contains 'teaminfo.asp?id='. Use
+    surrounding row text as context to help identify the season/year.
+    """
+    soup = BeautifulSoup(html, 'html.parser')
+    teams = []
+    for a in soup.find_all('a', href=True):
+        href = a['href']
+        if 'teaminfo.asp' in href.lower():
+            full_url = urljoin(base_url, href)
+            label = a.get_text(' ', strip=True) or 'Team'
+            row = a.find_parent('tr')
+            context = row.get_text(' ', strip=True) if row else ''
+            teams.append({'url': full_url, 'label': label, 'context': context})
+    return teams
 
 
 def build_schedule(urls):
@@ -199,40 +245,201 @@ def build_schedule(urls):
     conflict_dates = set(counts[counts > 1].index)
     out_df['Is_conflict'] = out_df['Date'].isin(conflict_dates)
 
-    # Date display string
-    out_df['Date_display'] = out_df['Date'].dt.strftime('%b %-d')
+    # Date display string, e.g., "Apr 15"
+    out_df['Date_display'] = out_df['Date'].dt.strftime('%b %d').str.replace(' 0', ' ', regex=False)
 
     return out_df
+
+
+@app.route('/', methods=['GET'])
+def index():
+    current_year = datetime.now().year
+    return render_template_string(
+        HTML_TEMPLATE,
+        urls_value='',
+        profile_url='',
+        schedule=None,
+        message=None,
+        error=False,
+        team_choices=None,
+        current_year=current_year,
+        filtered_to_year=False,
+    )
 
 
 @app.route('/generate', methods=['POST'])
 def generate():
     urls_raw = request.form.get('urls', '')
+    profile_url = request.form.get('profile_url', '').strip()
+    selected_team_urls = request.form.getlist('team_urls')
+    current_year = datetime.now().year
+
+    # Stage 2: user selected teams from profile
+    if selected_team_urls:
+        urls = selected_team_urls
+        try:
+            out_df = build_schedule(urls)
+        except Exception as e:
+            return render_template_string(
+                HTML_TEMPLATE,
+                message=str(e),
+                error=True,
+                urls_value='
+'.join(urls),
+                profile_url=profile_url,
+                schedule=None,
+                team_choices=None,
+                current_year=current_year,
+                filtered_to_year=True,
+            )
+
+        schedule = out_df.to_dict(orient='records')
+        return render_template_string(
+            HTML_TEMPLATE,
+            message=None,
+            error=False,
+            urls_value='
+'.join(urls),
+            profile_url=profile_url,
+            schedule=schedule,
+            team_choices=None,
+            current_year=current_year,
+            filtered_to_year=True,
+        )
+
+    # Stage 1: profile URL given, no team selection yet, and no manual URLs
+    if profile_url and not urls_raw:
+        try:
+            resp = requests.get(profile_url, timeout=15)
+            resp.raise_for_status()
+        except Exception as e:
+            return render_template_string(
+                HTML_TEMPLATE,
+                message=f"Error fetching profile: {e}",
+                error=True,
+                urls_value=urls_raw,
+                profile_url=profile_url,
+                schedule=None,
+                team_choices=None,
+                current_year=current_year,
+                filtered_to_year=False,
+            )
+
+        teams = parse_profile_for_teams(resp.text, profile_url)
+        if not teams:
+            return render_template_string(
+                HTML_TEMPLATE,
+                message="Could not find any team links on that profile. You can paste team URLs manually instead.",
+                error=True,
+                urls_value=urls_raw,
+                profile_url=profile_url,
+                schedule=None,
+                team_choices=None,
+                current_year=current_year,
+                filtered_to_year=False,
+            )
+
+        # Filter for current-year teams if possible
+        year_str = str(current_year)
+        current_teams = [t for t in teams if year_str in t.get('context', '') or year_str in t.get('label', '')]
+        if current_teams:
+            team_choices = current_teams
+            filtered_to_year = True
+        else:
+            team_choices = teams
+            filtered_to_year = False
+
+        return render_template_string(
+            HTML_TEMPLATE,
+            message=None,
+            error=False,
+            urls_value=urls_raw,
+            profile_url=profile_url,
+            schedule=None,
+            team_choices=team_choices,
+            current_year=current_year,
+            filtered_to_year=filtered_to_year,
+        )
+
+    # Manual URLs path (existing behavior)
     urls = [u.strip() for u in urls_raw.splitlines() if u.strip()]
     if not urls:
-        return render_template_string(HTML_TEMPLATE, message="Please paste at least one URL.", error=True, urls_value=urls_raw, schedule=None)
+        return render_template_string(
+            HTML_TEMPLATE,
+            message="Please paste at least one team URL or provide a player profile URL.",
+            error=True,
+            urls_value=urls_raw,
+            profile_url=profile_url,
+            schedule=None,
+            team_choices=None,
+            current_year=current_year,
+            filtered_to_year=False,
+        )
 
     try:
         out_df = build_schedule(urls)
     except Exception as e:
-        return render_template_string(HTML_TEMPLATE, message=str(e), error=True, urls_value=urls_raw, schedule=None)
+        return render_template_string(
+            HTML_TEMPLATE,
+            message=str(e),
+            error=True,
+            urls_value=urls_raw,
+            profile_url=profile_url,
+            schedule=None,
+            team_choices=None,
+            current_year=current_year,
+            filtered_to_year=False,
+        )
 
     schedule = out_df.to_dict(orient='records')
 
-    return render_template_string(HTML_TEMPLATE, message=None, error=False, urls_value=urls_raw, schedule=schedule)
+    return render_template_string(
+        HTML_TEMPLATE,
+        message=None,
+        error=False,
+        urls_value=urls_raw,
+        profile_url=profile_url,
+        schedule=schedule,
+        team_choices=None,
+        current_year=current_year,
+        filtered_to_year=False,
+    )
 
 
 @app.route('/download', methods=['POST'])
 def download():
     urls_raw = request.form.get('urls', '')
+    profile_url = request.form.get('profile_url', '').strip()
+    current_year = datetime.now().year
+
     urls = [u.strip() for u in urls_raw.splitlines() if u.strip()]
     if not urls:
-        return render_template_string(HTML_TEMPLATE, message="Please paste at least one URL.", error=True, urls_value=urls_raw, schedule=None)
+        return render_template_string(
+            HTML_TEMPLATE,
+            message="Please generate a schedule first.",
+            error=True,
+            urls_value=urls_raw,
+            profile_url=profile_url,
+            schedule=None,
+            team_choices=None,
+            current_year=current_year,
+            filtered_to_year=False,
+        )
 
     try:
         out_df = build_schedule(urls)
     except Exception as e:
-        return render_template_string(HTML_TEMPLATE, message=str(e), error=True, urls_value=urls_raw, schedule=None)
+        return render_template_string(
+            HTML_TEMPLATE,
+            message=str(e),
+            error=True,
+            urls_value=urls_raw,
+            profile_url=profile_url,
+            schedule=None,
+            team_choices=None,
+            current_year=current_year,
+            filtered_to_year=False,
+        )
 
     # Write to in-memory Excel
     output = io.BytesIO()
