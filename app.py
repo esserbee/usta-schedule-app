@@ -284,8 +284,7 @@ def generate():
                 HTML_TEMPLATE,
                 message=str(e),
                 error=True,
-                urls_value='
-'.join(urls),
+                urls_value=''.join(urls),
                 profile_url=profile_url,
                 schedule=None,
                 team_choices=None,
@@ -298,8 +297,7 @@ def generate():
             HTML_TEMPLATE,
             message=None,
             error=False,
-            urls_value='
-'.join(urls),
+            urls_value=''.join(urls),
             profile_url=profile_url,
             schedule=schedule,
             team_choices=None,
