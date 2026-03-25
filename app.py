@@ -35,21 +35,37 @@ HTML_TEMPLATE = """<!doctype html>
     tr.conflict { background: #fff7c2; }
     .actions { margin-top: 1rem; }
     .team-list label { font-weight: 400; }
+    fieldset { border: 1px solid #ddd; padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
+    legend { padding: 0 0.25rem; font-weight: 600; }
   </style>
 </head>
 <body>
   <h1>USTA NorCal League Schedule Organizer</h1>
-  <p>Paste your USTA NorCal player profile URL to pick your current-year teams, or paste team info URLs directly. The app will fetch schedules, show a combined table, and let you download an Excel file with conflicts highlighted.</p>
+  <p>Step 1: Choose whether to use your USTA NorCal player profile or paste individual team info URLs. Step 2: Review the combined schedule and download an Excel file with conflicts highlighted.</p>
 
   <form method="post" action="/generate">
-    <label for="profile_url">Player profile URL (optional)</label>
-    <input type="url" id="profile_url" name="profile_url" placeholder="https://leagues.ustanorcal.com/...player..." value="{{ profile_url or '' }}">
+    <fieldset>
+      <legend>Step 1: Input method</legend>
+      <label>
+        <input type="radio" name="mode" value="profile" {% if mode == 'profile' %}checked{% endif %}>
+        Use player profile URL
+      </label>
+      <label>
+        <input type="radio" name="mode" value="teams" {% if mode == 'teams' %}checked{% endif %}>
+        Use individual team info URLs
+      </label>
+    </fieldset>
 
-    <label for="urls">Team info URLs (optional)</label>
+    <label for="profile_url">Player profile URL</label>
+    <input type="url" id="profile_url" name="profile_url" placeholder="https://leagues.ustanorcal.com/...playermatches.asp?id=..." value="{{ profile_url or '' }}">
+    <div class="help">Used when "Use player profile URL" is selected.</div>
+
+    <label for="urls">Team info URLs</label>
     <textarea id="urls" name="urls" placeholder="https://leagues.ustanorcal.com/teaminfo.asp?id=109510
 https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</textarea>
-    <div class="help">You can either select teams from your profile above, paste team URLs here, or do both.</div>
-    <button type="submit">Generate Schedule</button>
+    <div class="help">Used when "Use individual team info URLs" is selected (one URL per line).</div>
+
+    <button type="submit">Next</button>
   </form>
 
   {% if message %}
@@ -66,12 +82,13 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
     {% endif %}
     <form method="post" action="/generate">
       <input type="hidden" name="profile_url" value="{{ profile_url | e }}">
+      <input type="hidden" name="mode" value="profile">
       <div class="team-list">
       {% for t in team_choices %}
         <div>
           <label>
             <input type="checkbox" name="team_urls" value="{{ t.url }}" checked>
-            {{ t.label }}{% if t.context %} — {{ t.context }}{% endif %}
+            {{ t.label }}
           </label>
         </div>
       {% endfor %}
@@ -112,6 +129,8 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
     <div class="actions">
       <form method="post" action="/download">
         <input type="hidden" name="urls" value="{{ urls_value | e }}">
+        <input type="hidden" name="mode" value="{{ mode }}">
+        <input type="hidden" name="profile_url" value="{{ profile_url | e }}">
         <button type="submit">Download Excel Schedule</button>
       </form>
     </div>
@@ -264,6 +283,7 @@ def index():
         team_choices=None,
         current_year=current_year,
         filtered_to_year=False,
+        mode='profile',
     )
 
 
@@ -272,9 +292,10 @@ def generate():
     urls_raw = request.form.get('urls', '')
     profile_url = request.form.get('profile_url', '').strip()
     selected_team_urls = request.form.getlist('team_urls')
+    mode = request.form.get('mode', 'profile')
     current_year = datetime.now().year
 
-    # Stage 2: user selected teams from profile
+    # Stage 2: user selected teams from profile (profile mode only)
     if selected_team_urls:
         urls = selected_team_urls
         try:
@@ -290,6 +311,7 @@ def generate():
                 team_choices=None,
                 current_year=current_year,
                 filtered_to_year=True,
+                mode='profile',
             )
 
         schedule = out_df.to_dict(orient='records')
@@ -303,10 +325,24 @@ def generate():
             team_choices=None,
             current_year=current_year,
             filtered_to_year=True,
+            mode='profile',
         )
 
-    # Stage 1: profile URL given, no team selection yet, and no manual URLs
-    if profile_url and not urls_raw:
+    # Profile mode: fetch profile and present teams to choose
+    if mode == 'profile':
+        if not profile_url:
+            return render_template_string(
+                HTML_TEMPLATE,
+                message="Please provide a player profile URL.",
+                error=True,
+                urls_value=urls_raw,
+                profile_url=profile_url,
+                schedule=None,
+                team_choices=None,
+                current_year=current_year,
+                filtered_to_year=False,
+                mode='profile',
+            )
         try:
             resp = requests.get(profile_url, timeout=15)
             resp.raise_for_status()
@@ -321,13 +357,14 @@ def generate():
                 team_choices=None,
                 current_year=current_year,
                 filtered_to_year=False,
+                mode='profile',
             )
 
         teams = parse_profile_for_teams(resp.text, profile_url)
         if not teams:
             return render_template_string(
                 HTML_TEMPLATE,
-                message="Could not find any team links on that profile. You can paste team URLs manually instead.",
+                message="Could not find any team links on that profile.",
                 error=True,
                 urls_value=urls_raw,
                 profile_url=profile_url,
@@ -335,9 +372,9 @@ def generate():
                 team_choices=None,
                 current_year=current_year,
                 filtered_to_year=False,
+                mode='profile',
             )
 
-        # Filter for current-year teams if possible
         year_str = str(current_year)
         current_teams = [t for t in teams if year_str in t.get('context', '') or year_str in t.get('label', '')]
         if current_teams:
@@ -357,14 +394,15 @@ def generate():
             team_choices=team_choices,
             current_year=current_year,
             filtered_to_year=filtered_to_year,
+            mode='profile',
         )
 
-    # Manual URLs path (existing behavior)
+    # Teams mode: use manual team URLs directly
     urls = [u.strip() for u in urls_raw.splitlines() if u.strip()]
     if not urls:
         return render_template_string(
             HTML_TEMPLATE,
-            message="Please paste at least one team URL or provide a player profile URL.",
+            message="Please paste at least one team URL.",
             error=True,
             urls_value=urls_raw,
             profile_url=profile_url,
@@ -372,6 +410,7 @@ def generate():
             team_choices=None,
             current_year=current_year,
             filtered_to_year=False,
+            mode='teams',
         )
 
     try:
@@ -387,6 +426,7 @@ def generate():
             team_choices=None,
             current_year=current_year,
             filtered_to_year=False,
+            mode='teams',
         )
 
     schedule = out_df.to_dict(orient='records')
@@ -401,6 +441,7 @@ def generate():
         team_choices=None,
         current_year=current_year,
         filtered_to_year=False,
+        mode='teams',
     )
 
 
@@ -408,6 +449,7 @@ def generate():
 def download():
     urls_raw = request.form.get('urls', '')
     profile_url = request.form.get('profile_url', '').strip()
+    mode = request.form.get('mode', 'profile')
     current_year = datetime.now().year
 
     urls = [u.strip() for u in urls_raw.splitlines() if u.strip()]
@@ -422,6 +464,7 @@ def download():
             team_choices=None,
             current_year=current_year,
             filtered_to_year=False,
+            mode=mode,
         )
 
     try:
@@ -437,6 +480,7 @@ def download():
             team_choices=None,
             current_year=current_year,
             filtered_to_year=False,
+            mode=mode,
         )
 
     # Write to in-memory Excel
