@@ -156,7 +156,7 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
       </tbody>
     </table>
     <div class="help" id="location-footnote">
-      * Location shows the listed Home facility of the Host team. Actual match location could be different; contact your team captain for specific details.
+      * Location may not be accurate sometimes, confirm with the Team captain before the match.
     </div>
     <div class="actions">
       <form method="post" action="/download">
@@ -200,6 +200,164 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
 time_re = re.compile(r"(\d{1,2}:\d{2}\s*(?:AM|PM))", re.IGNORECASE)
 
 PENDING_SCHEDULE_MESSAGE = 'Schedule not yet posted for this match by Home team. Check again later for updates'
+
+def extract_location_from_all_start_times_cell(cell_text):
+    """
+    Extract a likely court/facility location from the "All start times / lanes" cell.
+
+    Target examples:
+    - "Rinconada Ct 1-3" -> "Rinconada Park"
+    - "Cubberley cts 1/2/3" -> "Cubberley Center"
+    - "Court 1,2,3 at Bramhall park" -> "Bramhall Park"
+    - "Willow Glen Middle School (1399 Curtner Ave)" -> "Willow Glen Middle School"
+    - "Buchser middle school courts 3 - 7" -> "Buchser Middle School"
+    - "Sunnyvale Tennis Center (La Palmas Courts 1-5)" -> "Sunnyvale Tennis Center"
+    """
+    if not cell_text:
+        return ''
+
+    t = str(cell_text).replace('\u00a0', ' ').strip()
+    if not t:
+        return ''
+
+    # Remove time strings (may appear multiple times).
+    t_wo_times = time_re.sub('', t)
+    t_wo_times = re.sub(r'\s+', ' ', t_wo_times).strip()
+
+    def is_valid_location(name):
+        """Check if extracted text sounds like a real location."""
+        if not name or len(name) < 3:
+            return False
+        name = name.strip()
+        # Must start with uppercase letter (proper noun)
+        if not re.match(r'^[A-Z]', name):
+            return False
+        # Reject common non-location words
+        lower = name.lower()
+        bad_words = {'and', 'at', 'or', 'the', 'a', 'an', 'in', 'on', 'by', 'for', 'with',
+                     'all', 'first', 'second', 'third', 'shift', 'followed', 'available',
+                     'warm', 'warmup', 'up', 'courts', 'court', 'ct', 'cts',
+                     'no', 'not', 'please', 'thanks', 'thank', 'bring', 'your',
+                     'our', 'we', 'will', 'can', 'do', 'if', 'is', 'are', 'it'}
+        if lower in bad_words:
+            return False
+        # Check if it starts with bad words
+        if any(lower.startswith(w + ' ') for w in bad_words):
+            return False
+        # Must have at least one word with 3+ letters
+        words = name.split()
+        if not any(len(w) >= 3 for w in words):
+            return False
+        return True
+
+    # Facility-type suffixes with explicit case variations (no (?i) flag
+    # so that surrounding patterns can enforce case-sensitivity).
+    _fac = r'(?:[Ss]chool|[Cc]enter|[Pp]ark|[Cc]omplex|[Cc]lub|[Ss]tadium|[Aa]rena|[Hh]all|[Ff]ield|[Cc]ourts?)'
+
+    # ── Pattern 1 ──────────────────────────────────────────────────────
+    # Find all substrings that end with a facility keyword followed by a
+    # delimiter ( , ; . or end-of-string.  Pick the longest valid one.
+    # Examples:
+    #   "Sunnyvale Tennis Center (La Palmas Courts 1-5)" -> "Sunnyvale Tennis Center"
+    #   "Sunnyvale Tennis Center, Courts 1-5" -> "Sunnyvale Tennis Center"
+    #   "Carlmont High School Tennis Court, C2-C6" -> "Carlmont High School Tennis Court"
+    best = ''
+    for m in re.finditer(
+        r'([A-Z][A-Za-z]+(?:\s+[A-Za-z]+)*\s+' + _fac + r')\s*[(\,;.]',
+        t_wo_times
+    ):
+        name = re.sub(r'\s+', ' ', m.group(1).strip())
+        if is_valid_location(name) and len(name) > len(best):
+            best = name
+    if best:
+        return best.title()
+
+    # ── Pattern 2 ──────────────────────────────────────────────────────
+    # "<Name> middle/high school courts <digits>"
+    # Example: "Buchser middle school courts 3 - 7" -> "Buchser Middle School"
+    # No global (?i): group 1 must start uppercase. School keywords are
+    # made case-insensitive with character classes.
+    m = re.search(
+        r'\b([A-Z][a-zA-Z]+)\s+([Mm]iddle\s+[Ss]chool|[Hh]igh\s+[Ss]chool|[Ee]lementary\s+[Ss]chool)\s+(?:[Tt]ennis\s+)?[Cc]ourts?\b',
+        t_wo_times
+    )
+    if m:
+        name = (m.group(1) + ' ' + m.group(2)).strip()
+        name = re.sub(r'\s+', ' ', name).title()
+        if is_valid_location(name):
+            return name
+
+    # ── Pattern 3 ──────────────────────────────────────────────────────
+    # "Court(s) <numbers> at <Location>"
+    # Example: "Court 1,2,3 at Bramhall park" -> "Bramhall Park"
+    # No (?i) — capture group must start with actual uppercase letter.
+    m = re.search(
+        r'\b[Cc]ourts?\s*[\d/,\\\-\s]+\s+[Aa]t\s+([A-Z][a-z]+(?:\s+[A-Za-z]+)*)',
+        t_wo_times
+    )
+    if m:
+        name = m.group(1).strip()
+        # Stop at noise words
+        name = re.split(r'[\.;]|\b(?:[Ff]irst|[Ss]econd|[Tt]hird|[Ss]hift|[Ff]ollowed|[Aa]vailable|[Ww]armup|[Ww]arm\s+[Uu]p|[Nn]o\s+)\b', name)[0].strip()
+        name = re.sub(r'\s+', ' ', name)
+        if is_valid_location(name):
+            return name.title()
+
+    # ── Pattern 4 ──────────────────────────────────────────────────────
+    # "<ProperNoun> Ct <digits>"  (case-sensitive: "Ct" must be capitalized)
+    # Example: "Rinconada Ct 1-3" -> "Rinconada Park"
+    m = re.search(
+        r'\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+Ct\s+[\d/\\\-]',
+        t_wo_times
+    )
+    if m:
+        name = m.group(1).strip()
+        if is_valid_location(name):
+            if re.search(r'(?i)\b(?:Park|Center|Stadium|Complex|Club|Arena|Field|Courts?)\b', name):
+                return name
+            return f"{name} Park"
+
+    # ── Pattern 5 ──────────────────────────────────────────────────────
+    # "<ProperNoun> cts <digits>"  (case-insensitive "cts")
+    # Example: "Cubberley cts 1/2/3" -> "Cubberley Center"
+    m = re.search(
+        r'\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+[Cc]ts\s+[\d/\\\-]',
+        t_wo_times
+    )
+    if m:
+        name = m.group(1).strip()
+        if is_valid_location(name):
+            if re.search(r'(?i)\b(?:Park|Center|Stadium|Complex|Club|Arena|Field|Courts?)\b', name):
+                return name
+            return f"{name} Center"
+
+    # ── Pattern 6 ──────────────────────────────────────────────────────
+    # "<ABBREV> Courts <digits>"  (all-caps abbreviation + Courts)
+    # Example: "STC Courts 1-5" -> "STC Courts"
+    m = re.search(
+        r'\b([A-Z]{2,}(?:\s+[A-Z][a-zA-Z]+)*)\s+([Cc]ourts?)\s+[\d/\\\-]',
+        t_wo_times
+    )
+    if m:
+        name = m.group(1).strip()
+        suffix = m.group(2).strip()
+        if is_valid_location(name):
+            return f"{name} {suffix.title()}"
+
+    # ── Pattern 7 ──────────────────────────────────────────────────────
+    # "at <ABBREV> <digits>"  (all-caps abbreviation directly before digits)
+    # Example: "courts are at STC 1-5" -> "STC"
+    m = re.search(
+        r'\b[Aa]t\s+([A-Z]{2,})\s+[\d/\\\-]',
+        t_wo_times
+    )
+    if m:
+        name = m.group(1).strip()
+        if is_valid_location(name):
+            return name
+
+    return ''
+
 
 def extract_player_name_from_profile(html):
     """
@@ -340,7 +498,10 @@ def parse_schedule_html(html, fallback_name, team_page_url, home_facility):
 
         home_away = tds[6].get_text(' ', strip=True)
         is_home_match = home_away.strip().lower().startswith('home')
-        location = home_facility if is_home_match else ''
+
+        # Prefer extracting the actual court/facility from the schedule cell.
+        cell_location = extract_location_from_all_start_times_cell(full_time)
+        location = cell_location if cell_location else (home_facility if is_home_match else '')
         rows_out.append({
             'Date_raw': date_text,
             'Day': day_text,
@@ -443,7 +604,7 @@ def build_schedule(urls):
                 facility_cache[op_url] = home_facility
 
     for r in all_rows:
-        if not r.get('Is_home_match'):
+        if not r.get('Is_home_match') and not str(r.get('Location', '')).strip():
             op_url = r.get('Opponent_team_url', '')
             r['Location'] = facility_cache.get(op_url, '') if op_url else ''
 
