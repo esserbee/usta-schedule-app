@@ -123,6 +123,9 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
   <div class="results">
     <h2>Combined schedule</h2>
     <p>Rows highlighted in yellow are days where you have more than one match scheduled.</p>
+    <p id="location-footnote" style="font-size: 1.05rem; color: #a12c2c; font-weight: 600;">
+      * Entry in the location column may not be accurate sometimes, use &ldquo;All start times / lanes&rdquo; as ground truth for conflicts, and must confirm Match Location with the Team captain before the match.
+    </p>
     <table class="schedule-table">
       <thead>
         <tr>
@@ -155,9 +158,6 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
         {% endfor %}
       </tbody>
     </table>
-    <div class="help" id="location-footnote">
-      * Location may not be accurate sometimes, confirm with the Team captain before the match.
-    </div>
     <div class="actions">
       <form method="post" action="/download">
         <input type="hidden" name="urls" value="{{ urls_value | e }}">
