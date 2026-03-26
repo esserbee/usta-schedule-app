@@ -113,6 +113,7 @@ HTML_TEMPLATE = """
         <button class="app-button stats" onclick="toggleApp('stats')">Player Statistics</button>
       </div>
     </div>
+    <p style="margin-top: 2rem; font-size: 0.8rem; color: #999;"><a target="_blank" href="https://icons8.com/icon/AF2FJWsPaMoY/tennis">Tennis Ball</a> cursor by <a target="_blank" href="https://icons8.com">Icons8</a></p>
   </div>
 
   <!-- Schedule app landing -->
