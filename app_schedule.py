@@ -9,6 +9,9 @@ from urllib.parse import urljoin
 import json
 
 
+app = Flask(__name__)
+
+
 HTML_TEMPLATE = """<!doctype html>
 <html lang="en">
 <head>
@@ -1017,4 +1020,35 @@ def schedule_download():
     filename = 'usta_schedule_combined.xlsx'
     return send_file(output, as_attachment=True, download_name=filename, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
+
+@app.route('/', methods=['GET'])
+def index():
+    return render_template_string(
+        HTML_TEMPLATE,
+        message=None,
+        error=False,
+        urls_value='',
+        profile_url='',
+        schedule=None,
+        team_choices=None,
+        current_year=datetime.now().year,
+        filtered_to_year=False,
+        mode='profile',
+        player_name=None,
+        player_first_name=None,
+    )
+
+
+@app.route('/generate', methods=['POST'])
+def generate():
+    return schedule_generate()
+
+
+@app.route('/download', methods=['POST'])
+def download():
+    return schedule_download()
+
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5001)
 

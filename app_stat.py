@@ -7,6 +7,9 @@ from urllib.parse import urljoin
 from flask import Flask, render_template_string, request
 
 
+app = Flask(__name__)
+
+
 HTML_TEMPLATE = """<!doctype html>
 <html lang="en">
 <head>
@@ -491,5 +494,27 @@ def stats_analyze():
             player_name=player_name,
             team_details=None
         )
+
+
+@app.route('/', methods=['GET'])
+def index():
+    return render_template_string(
+        HTML_TEMPLATE,
+        message=None,
+        error=False,
+        profile_url='',
+        player_stats=None,
+        player_name=None,
+        team_details=None,
+    )
+
+
+@app.route('/analyze', methods=['POST'])
+def analyze():
+    return stats_analyze()
+
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5002)
 
 

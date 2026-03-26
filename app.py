@@ -90,6 +90,69 @@ HTML_TEMPLATE = """
     .actions { margin-top: 1rem; }
     /* Universal rule to ensure all buttons get tennis cursor, overriding sub-app styles */
     button, .app-button, .clear-button, input[type="submit"] { cursor: var(--tennis-cursor) !important; }
+
+    @media (max-width: 768px) {
+      body { padding: 1rem; }
+
+      h1 { font-size: 1.8rem; margin-bottom: 1rem; }
+
+      h2 { font-size: 1.5rem; }
+
+      .landing,
+      .intro,
+      .app-container {
+        width: 100%;
+        max-width: none;
+      }
+
+      .intro { margin-bottom: 1.5rem; }
+
+      .features-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+        max-width: 100%;
+      }
+
+      .app-buttons {
+        flex-direction: column;
+        gap: 0.75rem;
+        margin-top: 1.5rem;
+      }
+
+      .app-button {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .app-container {
+        padding: 1rem;
+        border-radius: 10px;
+      }
+
+      .app-section {
+        margin-top: 2rem;
+      }
+
+      .schedule-table,
+      .stats-table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+
+      .schedule-table th,
+      .schedule-table td,
+      .stats-table th,
+      .stats-table td {
+        padding: 0.45rem;
+      }
+
+      #schedule-results .team-list,
+      #stats-results .team-list,
+      .team-list {
+        max-height: 240px;
+      }
+    }
   </style>
 </head>
 <body>
