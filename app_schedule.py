@@ -25,6 +25,7 @@ HTML_TEMPLATE = """<!doctype html>
     button { margin-top: 1rem; padding: 0.6rem 1.2rem; border-radius: 999px; border: none; background: #01696f; color: #fff; font-weight: 600; cursor: pointer; }
     button:hover { background: #0c4e54; }
     .help { font-size: 0.85rem; color: #666; margin-top: 0.25rem; }
+    .loading { margin-top: 1rem; padding: 0.85rem 1rem; border: 1px solid #cfe5e7; background: #eef8f9; border-radius: 4px; color: #014e54; font-weight: 600; }
     .status { margin-top: 1rem; font-size: 0.9rem; color: #444; }
     .error { color: #a12c2c; }
     code { background: #f0efea; padding: 0.1rem 0.3rem; border-radius: 4px; }
@@ -32,12 +33,12 @@ HTML_TEMPLATE = """<!doctype html>
     table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.9rem; }
     th, td { border: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; }
     th { background: #01696f; color: #fff; font-weight: 700; }
-    tr.conflict { background: #fff7c2; }
-    tr.pending { background: #efefef; color: #9a9a9a; font-style: italic; }
-    tr.conflict.pending { background: #efefef !important; color: #9a9a9a !important; font-style: italic; }
-    tr.pending td { color: #9a9a9a !important; font-style: italic !important; }
-    tr.conflict.pending td { color: #9a9a9a !important; font-style: italic !important; }
-    tr.conflict td { color: #222; }
+    table tr.conflict { background: #fff7c2 !important; }
+    table tr.conflict td { background: #fff7c2 !important; color: #222; }
+    table tr.pending { background: #efefef; color: #9a9a9a; font-style: italic; }
+    table tr.conflict.pending { background: #efefef !important; color: #9a9a9a !important; font-style: italic; }
+    table tr.pending td { color: #9a9a9a !important; font-style: italic !important; }
+    table tr.conflict.pending td { color: #9a9a9a !important; font-style: italic !important; }
     td.homeaway_home { color: #01696f !important; font-weight: 700; }
     td.homeaway_away { color: #a12c2c !important; font-weight: 700; }
     td.location_home { color: #0b6b0b !important; font-weight: 600; }
@@ -83,6 +84,8 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
 
     <button type="submit">Next</button>
   </form>
+
+  <div id="loading-message" class="loading" style="display:none;" aria-live="polite">Combining schedule... please wait.</div>
 
   {% if message %}
   <div class="status {% if error %}error{% endif %}">{{ message }}</div>
@@ -171,6 +174,27 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
   {% endif %}
 
   <script>
+    const mainForm = document.querySelector('form[action="/generate"]');
+
+    if (mainForm) {
+      mainForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const loading = document.getElementById('loading-message');
+        const submitButton = mainForm.querySelector('button[type="submit"]');
+
+        if (loading) loading.style.display = 'block';
+        if (submitButton) {
+          submitButton.dataset.originalText = submitButton.textContent;
+          submitButton.disabled = true;
+          submitButton.textContent = 'Combining...';
+        }
+
+        setTimeout(function() {
+          mainForm.submit();
+        }, 50);
+      });
+    }
+
     function toggleModeInputs() {
       const selected = document.querySelector('input[name="mode"]:checked');
       const mode = selected ? selected.value : 'profile';

@@ -46,6 +46,7 @@ HTML_TEMPLATE = """
     .status { margin-top: 1rem; padding: 0.75rem; border-radius: 4px; }
     .error { background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
     .success { background-color: #e8f5e8; color: #2e7d32; border: 1px solid #c8e6c9; }
+    .loading { margin-top: 1rem; padding: 0.85rem 1rem; border: 1px solid #cfe5e7; background: #eef8f9; border-radius: 4px; color: #014e54; font-weight: 600; }
     .results { margin-top: 2rem; }
     .schedule-table, .stats-table { border-collapse: collapse; width: 100%; margin-bottom: 2rem; }
     .schedule-table th, .schedule-table td, .stats-table th, .stats-table td { border: 1px solid #ddd; padding: 0.5rem; text-align: left; }
@@ -53,12 +54,12 @@ HTML_TEMPLATE = """
     .schedule-table tr:nth-child(even), .stats-table tr:nth-child(even) { background-color: #f9f9f9; }
     .schedule-table .conflict-row { background-color: #fff7c2; }
     .schedule-table .pending { color: #9a9a9a; font-style: italic; }
-    tr.conflict { background: #fff7c2; }
-    tr.conflict td { color: #222; }
-    tr.pending { background: #efefef; color: #9a9a9a; font-style: italic; }
-    tr.conflict.pending { background: #efefef !important; color: #9a9a9a !important; font-style: italic; }
-    tr.pending td { color: #9a9a9a !important; font-style: italic !important; }
-    tr.conflict.pending td { color: #9a9a9a !important; font-style: italic !important; }
+    .schedule-table tr.conflict { background-color: #fff7c2 !important; }
+    .schedule-table tr.conflict td { background-color: #fff7c2 !important; color: #222; }
+    .schedule-table tr.pending { background-color: #efefef; color: #9a9a9a; font-style: italic; }
+    .schedule-table tr.conflict.pending { background-color: #efefef !important; color: #9a9a9a !important; font-style: italic; }
+    .schedule-table tr.pending td { color: #9a9a9a !important; font-style: italic !important; }
+    .schedule-table tr.conflict.pending td { color: #9a9a9a !important; font-style: italic !important; }
     .footnote-link { margin-left: 0.25rem; color: #01696f; font-weight: 900; text-decoration: none; }
     .footnote-link:hover { text-decoration: underline; }
     #schedule-results .team-list label,
@@ -216,8 +217,41 @@ HTML_TEMPLATE = """
       if (statsGoBack) statsGoBack.style.display = 'block';
     }
 
+    function setFormLoadingState(form, isLoading, loadingText) {
+      var submitButtons = form.querySelectorAll('button[type="submit"]');
+      submitButtons.forEach(function(button) {
+        if (isLoading) {
+          if (!button.dataset.originalText) {
+            button.dataset.originalText = button.textContent;
+          }
+          button.disabled = true;
+          button.textContent = loadingText;
+        } else {
+          if (button.dataset.originalText) {
+            button.textContent = button.dataset.originalText;
+            delete button.dataset.originalText;
+          }
+          button.disabled = false;
+        }
+      });
+    }
+
+    function showLoadingMessage(resultsId, text) {
+      var container = document.getElementById(resultsId);
+      if (!container) return;
+      container.innerHTML = '<div class="loading" aria-live="polite">' + text + '</div>';
+      container.classList.remove('hidden');
+    }
+
     function submitFormAjax(form, resultsId) {
       var formData = new FormData(form);
+      var loadingText = resultsId === 'schedule-results'
+        ? 'Combining schedule... please wait.'
+        : 'Analyzing player statistics... please wait.';
+
+      setFormLoadingState(form, true, 'Working...');
+      showLoadingMessage(resultsId, loadingText);
+
       fetch(form.action, {
         method: 'POST',
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
@@ -237,9 +271,11 @@ HTML_TEMPLATE = """
         }, 100);
         // Re-attach submit handlers to any new forms inside results
         attachResultFormHandlers();
+        setFormLoadingState(form, false);
       })
       .catch(function(err) {
         console.error('Error:', err);
+        setFormLoadingState(form, false);
         alert('Error: ' + err.message);
       });
     }
@@ -248,6 +284,9 @@ HTML_TEMPLATE = """
       // Attach handlers to forms loaded via AJAX inside results
       var forms = document.querySelectorAll('#schedule-results form, #stats-results form');
       forms.forEach(function(form) {
+        if (form.getAttribute('action') === '/download') {
+          return;
+        }
         if (!form.dataset.bound) {
           form.dataset.bound = 'true';
           var resultsId = form.closest('#schedule-results') ? 'schedule-results' : 'stats-results';

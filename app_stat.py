@@ -32,6 +32,7 @@ HTML_TEMPLATE = """<!doctype html>
     .stats-table .grand-total { background-color: #e8f4f8; font-weight: bold; }
     .stats-table .grand-total td { border-top: 2px solid #01696f; }
     .help { font-size: 0.9rem; color: #666; margin-top: -0.5rem; margin-bottom: 1rem; }
+    .loading { margin-top: 1rem; padding: 0.85rem 1rem; border: 1px solid #cfe5e7; background: #eef8f9; border-radius: 4px; color: #014e54; font-weight: 600; }
   </style>
 </head>
 <body>
@@ -44,6 +45,8 @@ HTML_TEMPLATE = """<!doctype html>
     <div class="help">Enter your USTA NorCal player profile URL to extract career statistics.</div>
     <button type="submit">Analyze Statistics</button>
   </form>
+
+  <div id="loading-message" class="loading" style="display:none;" aria-live="polite">Analyzing player statistics... please wait.</div>
 
   {% if message %}
   <div class="status {% if error %}error{% else %}success{% endif %}">
@@ -132,6 +135,29 @@ HTML_TEMPLATE = """<!doctype html>
     {% endif %}
   </div>
   {% endif %}
+
+  <script>
+    const mainForm = document.querySelector('form[action="/analyze"]');
+
+    if (mainForm) {
+      mainForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const loading = document.getElementById('loading-message');
+        const submitButton = mainForm.querySelector('button[type="submit"]');
+
+        if (loading) loading.style.display = 'block';
+        if (submitButton) {
+          submitButton.dataset.originalText = submitButton.textContent;
+          submitButton.disabled = true;
+          submitButton.textContent = 'Analyzing...';
+        }
+
+        setTimeout(function() {
+          mainForm.submit();
+        }, 50);
+      });
+    }
+  </script>
 </body>
 </html>
 """
