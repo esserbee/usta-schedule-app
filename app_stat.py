@@ -17,12 +17,19 @@ HTML_TEMPLATE = """<!doctype html>
   <title>USTA NorCal Player Statistics</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 2rem; max-width: 1000px; margin: 0 auto; background: #f7f6f2; color: #222; }
-    h1 { font-size: 1.9rem; margin-bottom: 0.5rem; }
-    p { max-width: 70ch; }
+    :root { --tennis-cursor: url("/static/tennis-cursor.png") 16 16, pointer; }
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 2rem; max-width: 1200px; margin: 0 auto; background: #f7f6f2; color: #222; }
+    h1 { font-size: 2.2rem; margin-bottom: 2rem; color: #01696f; }
+    h2 { font-size: 1.9rem; margin-bottom: 0.5rem; }
+    p { line-height: 1.6; }
+    .landing { text-align: center; margin-bottom: 3rem; }
+    .intro { max-width: 1000px; margin: 0 auto 3rem auto; text-align: center; }
+    .intro-header { margin-bottom: 2rem; text-align: center; }
+    .intro-header p { font-size: 1.1rem; color: #555; margin-bottom: 0; }
+    .app-container { border: 2px solid #ddd; border-radius: 12px; padding: 2rem; margin-bottom: 2rem; background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
     label { font-weight: 600; display: block; margin-bottom: 0.25rem; }
     input { width: 100%; padding: 0.5rem; margin-bottom: 1rem; border: 1px solid #ccc; border-radius: 4px; }
-    button { background-color: #01696f; color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
+    button { background-color: #01696f; color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 4px; cursor: var(--tennis-cursor); font-weight: 600; }
     button:hover { background-color: #014e54; }
     .status { margin-top: 1rem; padding: 0.75rem; border-radius: 4px; }
     .error { background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
@@ -36,29 +43,99 @@ HTML_TEMPLATE = """<!doctype html>
     .stats-table .grand-total td { border-top: 2px solid #01696f; }
     .help { font-size: 0.9rem; color: #666; margin-top: -0.5rem; margin-bottom: 1rem; }
     .loading { margin-top: 1rem; padding: 0.85rem 1rem; border: 1px solid #cfe5e7; background: #eef8f9; border-radius: 4px; color: #014e54; font-weight: 600; }
+
+    @media (max-width: 768px) {
+      body { padding: 1rem; }
+
+      h1 { font-size: 1.8rem; margin-bottom: 1rem; }
+
+      h2 { font-size: 1.5rem; }
+
+      .landing,
+      .intro,
+      .app-container {
+        width: 100%;
+        max-width: none;
+      }
+
+      .intro { margin-bottom: 1.5rem; }
+
+      .intro-header {
+        margin-bottom: 1.25rem;
+      }
+
+      .intro-header p {
+        font-size: 1rem;
+        line-height: 1.5;
+      }
+
+      .app-container {
+        padding: 1rem;
+        border-radius: 10px;
+      }
+
+      .results {
+        margin-top: 1.5rem;
+      }
+
+      .help {
+        font-size: 0.82rem;
+        margin-top: 0.2rem;
+        margin-bottom: 0.85rem;
+      }
+
+      label {
+        margin-bottom: 0.2rem;
+      }
+
+      button {
+        padding: 0.65rem 1rem;
+        font-size: 0.95rem;
+      }
+
+      .stats-table th,
+      .stats-table td {
+        padding: 0.3rem 0.25rem;
+        font-size: 0.72rem;
+        white-space: normal;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+      }
+
+      .stats-table th { line-height: 1.1; }
+    }
   </style>
 </head>
 <body>
-  <h1>USTA NorCal Player Statistics</h1>
-  <p>View comprehensive career statistics extracted from your USTA NorCal player profile.</p>
+  <div class="landing">
+    <div class="app-container">
+      <h1>USTA NorCal Player Statistics</h1>
+      <div class="intro">
+        <div class="intro-header">
+          <p>View comprehensive career statistics extracted from your USTA NorCal player profile.</p>
+        </div>
+      </div>
 
-  <form method="post" action="/analyze">
-    <label for="profile_url">Player profile URL</label>
-    <input type="url" id="profile_url" name="profile_url" placeholder="https://leagues.ustanorcal.com/...playermatches.asp?id=..." value="{{ profile_url or '' }}" required>
-    <div class="help">Enter your USTA NorCal player profile URL to extract career statistics.</div>
-    <button type="submit">Analyze Statistics</button>
-  </form>
+      <form method="post" action="/analyze">
+        <label for="profile_url">Player profile URL</label>
+        <input type="url" id="profile_url" name="profile_url" placeholder="https://leagues.ustanorcal.com/...playermatches.asp?id=..." value="{{ profile_url or '' }}" required>
+        <div class="help">Enter your USTA NorCal player profile URL to extract career statistics.</div>
+        <button type="submit">Analyze Statistics</button>
+      </form>
 
-  <div id="loading-message" class="loading" style="display:none;" aria-live="polite">Analyzing player statistics... please wait.</div>
+      <div id="loading-message" class="loading" style="display:none;" aria-live="polite">Analyzing player statistics... please wait.</div>
 
-  {% if message %}
-  <div class="status {% if error %}error{% else %}success{% endif %}">
-    {{ message }}
+      {% if message %}
+      <div class="status {% if error %}error{% else %}success{% endif %}">
+        {{ message }}
+      </div>
+      {% endif %}
+    </div>
   </div>
-  {% endif %}
 
   {% if player_stats %}
   <div class="results">
+    <div class="app-container">
     <h2>{{ player_name }} - Career Statistics</h2>
     <p class="help">Statistics extracted from player profile. Data includes all teams and divisions across all years.</p>
     <table class="stats-table">
@@ -136,6 +213,7 @@ HTML_TEMPLATE = """<!doctype html>
       </tbody>
     </table>
     {% endif %}
+    </div>
   </div>
   {% endif %}
 

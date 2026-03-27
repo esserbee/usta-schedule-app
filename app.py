@@ -76,6 +76,9 @@ HTML_TEMPLATE = """
     #stats-results .clear-button { background-color: #a12c2c !important; }
     #schedule-results .clear-button:hover,
     #stats-results .clear-button:hover { background-color: #8b1f1f !important; }
+    #schedule-landing button[type="submit"],
+    #schedule-landing .clear-button { min-width: 170px; }
+    .download-frame { display: none; width: 0; height: 0; border: 0; }
     .stats-table .grand-total { background-color: #e8f4f8; font-weight: bold; }
     .stats-table .grand-total td { border-top: 2px solid #01696f; }
     .help { font-size: 0.9rem; color: #666; margin-top: -0.5rem; margin-bottom: 1rem; }
@@ -135,16 +138,26 @@ HTML_TEMPLATE = """
 
       .schedule-table,
       .stats-table {
-        display: block;
-        overflow-x: auto;
-        white-space: nowrap;
+        display: table;
+        width: 100%;
+        table-layout: fixed;
+        border-collapse: collapse;
       }
 
       .schedule-table th,
       .schedule-table td,
       .stats-table th,
       .stats-table td {
-        padding: 0.45rem;
+        padding: 0.3rem 0.25rem;
+        font-size: 0.72rem;
+        white-space: normal;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+      }
+
+      .schedule-table th,
+      .stats-table th {
+        line-height: 1.1;
       }
 
       #schedule-results .team-list,
@@ -207,7 +220,7 @@ HTML_TEMPLATE = """
           <label for="urls">Team info URLs (one per line)</label>
           <textarea id="urls" name="urls" rows="6" placeholder="https://leagues.ustanorcal.com/...teaminfo.asp?id=..."></textarea>
         </div>
-        <button type="submit">Analyze</button>
+        <button type="submit">Next</button>
       </form>
       <button class="clear-button" onclick="clearAll()">Go Back</button>
     </div>
@@ -347,7 +360,7 @@ HTML_TEMPLATE = """
       // Attach handlers to forms loaded via AJAX inside results
       var forms = document.querySelectorAll('#schedule-results form, #stats-results form');
       forms.forEach(function(form) {
-        if (form.getAttribute('action') === '/download') {
+        if (form.getAttribute('action') === '/download' || form.getAttribute('action') === '/calendar') {
           return;
         }
         if (!form.dataset.bound) {
@@ -426,6 +439,9 @@ def _extract_results_only(html_string):
     if h1:
         h1.decompose()
 
+    for intro_block in body.find_all(class_='intro'):
+        intro_block.decompose()
+
     first_form = body.find('form')
     if first_form:
         for sibling in list(first_form.previous_siblings):
@@ -436,10 +452,18 @@ def _extract_results_only(html_string):
     for script in body.find_all('script'):
         script.decompose()
 
-    inner = body.decode_contents().strip()
+    meaningful_blocks = []
+    for selector in ('.status', '.results'):
+        meaningful_blocks.extend(body.select(selector))
+
+    if not meaningful_blocks:
+        return ''
+
+    inner = '\n'.join(str(block) for block in meaningful_blocks)
 
     return ('<div class="app-container">\n'
             + inner
+            + '\n<iframe name="download-frame" class="download-frame" aria-hidden="true" tabindex="-1"></iframe>'
             + '\n<button class="clear-button" onclick="clearAll()">Clear</button>'
             + '\n</div>')
 
@@ -481,6 +505,13 @@ def generate():
 def download():
     if schedule_module:
         return schedule_module.schedule_download()
+    return 'Schedule app module not available.'
+
+
+@app.route('/calendar', methods=['POST'])
+def calendar():
+    if schedule_module:
+        return schedule_module.schedule_calendar()
     return 'Schedule app module not available.'
 
 

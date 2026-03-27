@@ -4,9 +4,10 @@ import re
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin
 import json
+import uuid
 
 
 app = Flask(__name__)
@@ -19,13 +20,20 @@ HTML_TEMPLATE = """<!doctype html>
   <title>USTA NorCal League Schedule Organizer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 2rem; max-width: 1000px; margin: 0 auto; background: #f7f6f2; color: #222; }
-    h1 { font-size: 1.9rem; margin-bottom: 0.5rem; }
-    p { max-width: 70ch; }
+    :root { --tennis-cursor: url("/static/tennis-cursor.png") 16 16, pointer; }
+    body { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 2rem; max-width: 1200px; margin: 0 auto; background: #f7f6f2; color: #222; }
+    h1 { font-size: 2.2rem; margin-bottom: 2rem; color: #01696f; }
+    h2 { font-size: 1.9rem; margin-bottom: 0.5rem; }
+    p { line-height: 1.6; }
+    .landing { text-align: center; margin-bottom: 3rem; }
+    .intro { max-width: 1000px; margin: 0 auto 3rem auto; text-align: center; }
+    .intro-header { margin-bottom: 2rem; text-align: center; }
+    .intro-header p { font-size: 1.1rem; color: #555; margin-bottom: 0; }
+    .app-container { border: 2px solid #ddd; border-radius: 12px; padding: 2rem; margin-bottom: 2rem; background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
     label { font-weight: 600; display: block; margin-bottom: 0.25rem; }
     textarea { width: 100%; min-height: 140px; padding: 0.75rem; border-radius: 8px; border: 1px solid #ccc; font-family: monospace; font-size: 0.9rem; }
     input[type="url"] { width: 100%; padding: 0.6rem 0.75rem; border-radius: 8px; border: 1px solid #ccc; font-size: 0.9rem; margin-bottom: 0.5rem; }
-    button { margin-top: 1rem; padding: 0.6rem 1.2rem; border-radius: 999px; border: none; background: #01696f; color: #fff; font-weight: 600; cursor: pointer; }
+    button { margin-top: 1rem; padding: 0.6rem 1.2rem; border-radius: 999px; border: none; background: #01696f; color: #fff; font-weight: 600; cursor: var(--tennis-cursor); }
     button:hover { background: #0c4e54; }
     .help { font-size: 0.85rem; color: #666; margin-top: 0.25rem; }
     .loading { margin-top: 1rem; padding: 0.85rem 1rem; border: 1px solid #cfe5e7; background: #eef8f9; border-radius: 4px; color: #014e54; font-weight: 600; }
@@ -49,155 +57,236 @@ HTML_TEMPLATE = """<!doctype html>
     .footnote-link { margin-left: 0.25rem; color: #01696f; font-weight: 900; text-decoration: none; }
     .footnote-link:hover { text-decoration: underline; }
     .actions { margin-top: 1rem; }
+    .actions form { display: inline-block; margin-right: 0.75rem; }
+    .download-frame { display: none; width: 0; height: 0; border: 0; }
     .team-list label { font-weight: 400; }
     fieldset { border: 1px solid #ddd; padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
     legend { padding: 0 0.25rem; font-weight: 600; }
+
+    @media (max-width: 768px) {
+      body { padding: 1rem; }
+
+      h1 { font-size: 1.8rem; margin-bottom: 1rem; }
+
+      h2 { font-size: 1.5rem; }
+
+      .landing,
+      .intro,
+      .app-container {
+        width: 100%;
+        max-width: none;
+      }
+
+      .intro { margin-bottom: 1.5rem; }
+
+      .intro-header {
+        margin-bottom: 1.25rem;
+      }
+
+      .intro-header p {
+        font-size: 1rem;
+        line-height: 1.5;
+      }
+
+      .app-container {
+        padding: 1rem;
+        border-radius: 10px;
+      }
+
+      .results {
+        margin-top: 1.5rem;
+      }
+
+      .help {
+        font-size: 0.82rem;
+        margin-top: 0.2rem;
+        margin-bottom: 0.85rem;
+      }
+
+      fieldset {
+        padding: 0.65rem 0.85rem;
+        margin-bottom: 0.85rem;
+      }
+
+      legend {
+        font-size: 0.95rem;
+      }
+
+      label {
+        margin-bottom: 0.2rem;
+      }
+
+      button {
+        padding: 0.65rem 1rem;
+        font-size: 0.95rem;
+      }
+
+      table {
+        display: table;
+        width: 100%;
+        table-layout: fixed;
+        border-collapse: collapse;
+      }
+
+      th, td {
+        padding: 0.3rem 0.25rem;
+        font-size: 0.72rem;
+        white-space: normal;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+      }
+
+      .footnote-link {
+        margin-left: 0.15rem;
+      }
+
+      th { line-height: 1.1; }
+    }
   </style>
 </head>
 <body>
-  <h1>USTA NorCal League Schedule Organizer</h1>
-  <p>Step 1: Choose whether to use your USTA NorCal player profile or paste individual team info URLs.</p>
-  <p>Step 2: Review the combined schedule and download an Excel file with conflicts highlighted.</p>
+  <div class="landing">
+    <div class="app-container">
+      <h1>USTA NorCal League Schedule Organizer</h1>
+      <div class="intro">
+        <div class="intro-header">
+          <p class="embedded-intro-copy">Choose a profile or paste team URLs, then combine and review the schedule in one place.</p>
+        </div>
+      </div>
 
-  <form method="post" action="/generate">
-    <fieldset>
-      <legend>Step 1: Input method</legend>
-      <label>
-        <input type="radio" name="mode" value="profile" {% if mode == 'profile' %}checked{% endif %}>
-        Use player profile URL
-      </label>
-      <label>
-        <input type="radio" name="mode" value="teams" {% if mode == 'teams' %}checked{% endif %}>
-        Use individual team info URLs
-      </label>
-    </fieldset>
+      <form method="post" action="/generate">
+        <fieldset>
+          <legend>Step 1: Input method</legend>
+          <label>
+            <input type="radio" name="mode" value="profile" {% if mode == 'profile' %}checked{% endif %}>
+            Use player profile URL
+          </label>
+          <label>
+            <input type="radio" name="mode" value="teams" {% if mode == 'teams' %}checked{% endif %}>
+            Use individual team info URLs
+          </label>
+        </fieldset>
 
-    <div id="profile_url_wrap" {% if mode != 'profile' %}style="display:none"{% endif %}>
-      <label for="profile_url">Player profile URL</label>
-      <input type="url" id="profile_url" name="profile_url" placeholder="https://leagues.ustanorcal.com/...playermatches.asp?id=..." value="{{ profile_url or '' }}">
-      <div class="help">Used when "Use player profile URL" is selected.</div>
-    </div>
+        <div id="profile_url_wrap" {% if mode != 'profile' %}style="display:none"{% endif %}>
+          <label for="profile_url">Player profile URL</label>
+          <input type="url" id="profile_url" name="profile_url" placeholder="https://leagues.ustanorcal.com/...playermatches.asp?id=..." value="{{ profile_url or '' }}">
+          <div class="help">Used when "Use player profile URL" is selected.</div>
+        </div>
 
-    <div id="urls_wrap" {% if mode != 'teams' %}style="display:none"{% endif %}>
-      <label for="urls">Team info URLs</label>
-      <textarea id="urls" name="urls" placeholder="https://leagues.ustanorcal.com/teaminfo.asp?id=109510
+        <div id="urls_wrap" {% if mode != 'teams' %}style="display:none"{% endif %}>
+          <label for="urls">Team info URLs</label>
+          <textarea id="urls" name="urls" placeholder="https://leagues.ustanorcal.com/teaminfo.asp?id=109510
 https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</textarea>
-      <div class="help">Used when "Use individual team info URLs" is selected (one URL per line).</div>
+          <div class="help">Used when "Use individual team info URLs" is selected (one URL per line).</div>
+        </div>
+
+        <button type="submit">Next</button>
+      </form>
+
+      <div id="loading-message" class="loading" style="display:none;" aria-live="polite">Combining schedule... please wait.</div>
+
+      {% if message %}
+      <div class="status {% if error %}error{% endif %}">{{ message }}</div>
+      {% endif %}
     </div>
-
-    <button type="submit">Next</button>
-  </form>
-
-  <div id="loading-message" class="loading" style="display:none;" aria-live="polite">Combining schedule... please wait.</div>
-
-  {% if message %}
-  <div class="status {% if error %}error{% endif %}">{{ message }}</div>
-  {% endif %}
+  </div>
 
   {% if team_choices %}
   <div class="results">
-    <h2>Select teams for {{ current_year }}</h2>
-    {% if player_first_name %}
-      <p class="help">Hi {{ player_first_name }} — select the teams below to build your schedule.</p>
-    {% endif %}
-    {% if filtered_to_year %}
-      <p>Showing teams detected for {{ current_year }} from your profile. Select which ones to include in the schedule.</p>
-    {% else %}
-      <p>These are the teams found on your profile. Select which ones to include in the schedule.</p>
-    {% endif %}
-    <form method="post" action="/generate">
-      <input type="hidden" name="profile_url" value="{{ profile_url | e }}">
-      <input type="hidden" name="mode" value="profile">
-      <input type="hidden" name="player_name" value="{{ player_name | e }}">
-      <div class="team-list">
-      {% for t in team_choices %}
-        <div>
-          <label>
-            <input type="checkbox" name="team_urls" value="{{ t.url }}" checked>
-            {{ t.label }}
-          </label>
-        </div>
-      {% endfor %}
-      </div>
-      <button type="submit">Build Schedule from Selected Teams</button>
-    </form>
-  </div>
-  {% endif %}
-
-  
-  {% if schedule %}
-  <div class="results">
-    <h2>Combined schedule</h2>
-    <p>Rows highlighted in yellow are days where you have more than one match scheduled.</p>
-    <p id="location-footnote" style="font-size: 1.05rem; color: #a12c2c; font-weight: 600;">
-      * Entry in the location column may not be accurate sometimes, use &ldquo;All start times / lanes&rdquo; as ground truth for conflicts, and must confirm Match Location with the Team captain before the match.
-    </p>
-    <table class="schedule-table">
-      <thead>
-        <tr>
-          <th>Date</th>
-          <th>Team name</th>
-          <th>Match time</th>
-          <th>All start times / lanes</th>
-          <th>Opponent team</th>
-          <th>Home/Away</th>
-          <th>Location<sup><a href="#location-footnote" class="footnote-link">*</a></sup></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in schedule %}
-        <tr class="{% if row.Is_conflict %}conflict{% endif %}{% if row.Is_pending_schedule %} pending{% endif %}">
-          <td>{{ row.Date_display }}</td>
-          <td>{{ row['Team name'] }}</td>
-          <td>{{ row['Match time'] }}</td>
-          <td>
-            {% if row.Is_pending_schedule %}
-              Schedule not yet posted for this match by Home team. Check again later for updates
-            {% else %}
-              {{ row['All start times / lanes'] }}
-            {% endif %}
-          </td>
-          <td>{{ row['Opponent team'] }}</td>
-          <td class="{% if row.Is_home_match %}homeaway_home{% else %}homeaway_away{% endif %}">{{ row['Home/Away'] }}</td>
-          <td class="{% if row.Is_home_match %}location_home{% else %}location_away{% endif %}">{{ row['Location'] }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    <div class="actions">
-      <form method="post" action="/download">
-        <input type="hidden" name="urls" value="{{ urls_value | e }}">
-        <input type="hidden" name="mode" value="{{ mode }}">
-        <input type="hidden" name="profile_url" value="{{ profile_url | e }}">
-        <input type="hidden" name="schedule_json" value='{{ schedule | tojson | e }}'>
-        <button type="submit">Download Excel Schedule</button>
+    <div class="app-container">
+      <h2>Select teams for {{ current_year }}</h2>
+      {% if player_first_name %}
+        <p class="help embedded-intro-copy">Hi {{ player_first_name }} — select the teams below to build your schedule.</p>
+      {% endif %}
+      {% if filtered_to_year %}
+        <p class="embedded-intro-copy">Showing teams detected for {{ current_year }} from your profile. Select which ones to include in the schedule.</p>
+      {% else %}
+        <p class="embedded-intro-copy">These are the teams found on your profile. Select which ones to include in the schedule.</p>
+      {% endif %}
+      <form id="team-select-form" method="post" action="/generate">
+        <fieldset>
+          <legend>Step 2: Select teams</legend>
+          <input type="hidden" name="profile_url" value="{{ profile_url | e }}">
+          <input type="hidden" name="mode" value="profile">
+          <input type="hidden" name="player_name" value="{{ player_name | e }}">
+          <div class="team-list">
+          {% for t in team_choices %}
+            <div>
+              <label>
+                <input type="checkbox" name="team_urls" value="{{ t.url }}" checked>
+                {{ t.label }}
+              </label>
+            </div>
+          {% endfor %}
+          </div>
+          <button type="submit">Build Schedule from Selected Teams</button>
+          <div id="team-loading-message" class="loading" style="display:none;" aria-live="polite">Combining schedule... please wait.</div>
+        </fieldset>
       </form>
     </div>
   </div>
   {% endif %}
 
+  {% if schedule %}
+  <div class="results">
+    <div class="app-container">
+      <h2>Combined schedule</h2>
+      <p>Rows highlighted in yellow are days where you have more than one match scheduled.</p>
+      <p id="location-footnote" style="font-size: 1.05rem; color: #a12c2c; font-weight: 600;">
+        * Entry in the location column may not be accurate sometimes, use &ldquo;All start times / lanes&rdquo; as ground truth for conflicts, and must confirm Match Location with the Team captain before the match.
+      </p>
+      <table class="schedule-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Team name</th>
+            <th>Match time</th>
+            <th>All start times / lanes</th>
+            <th>Opponent team</th>
+            <th>Home/Away</th>
+            <th>Location<sup><a href="#location-footnote" class="footnote-link">*</a></sup></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in schedule %}
+          <tr class="{% if row.Is_conflict %}conflict{% endif %}{% if row.Is_pending_schedule %} pending{% endif %}">
+            <td>{{ row.Date_display }}</td>
+            <td>{{ row['Team name'] }}</td>
+            <td>{{ row['Match time'] }}</td>
+            <td>
+              {% if row.Is_pending_schedule %}
+                Schedule not yet posted for this match by Home team. Check again later for updates
+              {% else %}
+                {{ row['All start times / lanes'] }}
+              {% endif %}
+            </td>
+            <td>{{ row['Opponent team'] }}</td>
+            <td class="{% if row.Is_home_match %}homeaway_home{% else %}homeaway_away{% endif %}">{{ row['Home/Away'] }}</td>
+            <td class="{% if row.Is_home_match %}location_home{% else %}location_away{% endif %}">{{ row['Location'] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="actions">
+        <form method="post" action="/download" target="download-frame">
+          <input type="hidden" name="urls" value="{{ urls_value | e }}">
+          <input type="hidden" name="mode" value="{{ mode }}">
+          <input type="hidden" name="profile_url" value="{{ profile_url | e }}">
+          <input type="hidden" name="schedule_json" value='{{ schedule | tojson | e }}'>
+          <button type="submit">Download Excel Schedule</button>
+        </form>
+        <form method="post" action="/calendar" target="download-frame">
+          <input type="hidden" name="schedule_json" value='{{ schedule | tojson | e }}'>
+          <button type="submit">Add Schedule to Calendar</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <iframe name="download-frame" class="download-frame" aria-hidden="true" tabindex="-1"></iframe>
+
   <script>
-    const mainForm = document.querySelector('form[action="/generate"]');
-
-    if (mainForm) {
-      mainForm.addEventListener('submit', function(e) {
-        e.preventDefault();
-        const loading = document.getElementById('loading-message');
-        const submitButton = mainForm.querySelector('button[type="submit"]');
-
-        if (loading) loading.style.display = 'block';
-        if (submitButton) {
-          submitButton.dataset.originalText = submitButton.textContent;
-          submitButton.disabled = true;
-          submitButton.textContent = 'Combining...';
-        }
-
-        setTimeout(function() {
-          mainForm.submit();
-        }, 50);
-      });
-    }
-
     function toggleModeInputs() {
       const selected = document.querySelector('input[name="mode"]:checked');
       const mode = selected ? selected.value : 'profile';
@@ -213,12 +302,66 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
       }
     }
 
+    function showLoadingState(form, buttonText, loadingId = 'loading-message') {
+      const loading = document.getElementById(loadingId);
+      const submitButton = form.querySelector('button[type="submit"]');
+
+      if (loading) loading.style.display = 'block';
+      if (submitButton) {
+        submitButton.dataset.originalText = submitButton.textContent;
+        submitButton.disabled = true;
+        submitButton.textContent = buttonText;
+      }
+    }
+
+    const mainForm = document.querySelector('form[action="/generate"]');
+    if (mainForm) {
+      mainForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        setTimeout(function() {
+          mainForm.submit();
+        }, 50);
+      });
+    }
+
+    const teamSelectForm = document.getElementById('team-select-form');
+    if (teamSelectForm) {
+      teamSelectForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        showLoadingState(teamSelectForm, 'Working...', 'team-loading-message');
+        setTimeout(function() {
+          teamSelectForm.submit();
+        }, 100);
+      });
+    }
+
+    const downloadForm = document.querySelector('form[action="/download"]');
+    if (downloadForm) {
+      downloadForm.addEventListener('submit', function() {
+        const button = downloadForm.querySelector('button[type="submit"]');
+        if (button) {
+          button.dataset.originalText = button.textContent;
+          button.disabled = true;
+          button.textContent = 'Preparing download...';
+        }
+      });
+    }
+
     document.querySelectorAll('input[name="mode"]').forEach((el) => {
       el.addEventListener('change', toggleModeInputs);
     });
 
+    function scrollToRenderedResults() {
+      const target = document.querySelector('.results .app-container');
+      if (!target) return;
+      setTimeout(function() {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+    }
+
     // Ensure initial state matches server-rendered `mode`.
     toggleModeInputs();
+    scrollToRenderedResults();
   </script>
 </body>
 </html>
@@ -1021,6 +1164,94 @@ def schedule_download():
     return send_file(output, as_attachment=True, download_name=filename, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
+def _build_ics_from_schedule_records(records):
+    """Create a simple ICS calendar file from schedule records."""
+    def parse_event_datetime(date_value, time_value):
+        date_dt = None
+        if isinstance(date_value, datetime):
+            date_dt = date_value
+        else:
+            for fmt in ('%m/%d/%y', '%m/%d/%Y'):
+                try:
+                    date_dt = datetime.strptime(str(date_value), fmt)
+                    break
+                except Exception:
+                    continue
+        if date_dt is None:
+            return None, None
+
+        time_str = str(time_value or '').strip().upper()
+        match = re.search(r'(\d{1,2}:\d{2}\s*[AP]M)', time_str)
+        if match:
+            try:
+                time_dt = datetime.strptime(match.group(1).replace(' ', ''), '%I:%M%p').time()
+            except Exception:
+                time_dt = datetime.min.time()
+        else:
+            time_dt = datetime.min.time()
+
+        start = datetime.combine(date_dt.date(), time_dt)
+        end = start + timedelta(hours=1, minutes=30)
+        return start, end
+
+    def format_utc(dt):
+        return dt.replace(tzinfo=timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+
+    lines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//USTA NorCal League Schedule Organizer//EN',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+    ]
+
+    for row in records:
+        if row.get('Is_pending_schedule'):
+            continue
+        start, end = parse_event_datetime(row.get('Date'), row.get('Match time'))
+        if not start or not end:
+            continue
+        summary = f"USTA Match: {row.get('Team name', '')} vs {row.get('Opponent team', '')}".strip()
+        location = row.get('Location') or row.get('All start times / lanes') or ''
+        description = f"Home/Away: {row.get('Home/Away', '')}"
+        uid = str(uuid.uuid4())
+        lines.extend([
+            'BEGIN:VEVENT',
+            f'UID:{uid}',
+            f'DTSTAMP:{format_utc(datetime.utcnow())}',
+            f'DTSTART:{format_utc(start)}',
+            f'DTEND:{format_utc(end)}',
+            f'SUMMARY:{summary}',
+            f'LOCATION:{location}',
+            f'DESCRIPTION:{description}',
+            'END:VEVENT',
+        ])
+
+    lines.append('END:VCALENDAR')
+    return '\r\n'.join(lines) + '\r\n'
+
+
+@app.route('/calendar', methods=['POST'])
+def schedule_calendar():
+    schedule_json = request.form.get('schedule_json', '').strip()
+    if not schedule_json:
+        return 'Please generate a schedule first.'
+
+    try:
+        records = json.loads(schedule_json)
+    except Exception:
+        return 'Unable to export calendar from the current schedule.'
+
+    ics_content = _build_ics_from_schedule_records(records)
+    output = io.BytesIO(ics_content.encode('utf-8'))
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name='usta_schedule.ics',
+        mimetype='text/calendar',
+    )
+
+
 @app.route('/', methods=['GET'])
 def index():
     return render_template_string(
@@ -1047,6 +1278,11 @@ def generate():
 @app.route('/download', methods=['POST'])
 def download():
     return schedule_download()
+
+
+@app.route('/calendar', methods=['POST'])
+def calendar():
+    return schedule_calendar()
 
 
 if __name__ == '__main__':
