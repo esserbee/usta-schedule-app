@@ -239,6 +239,7 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
         <thead>
           <tr>
             <th>Date</th>
+            <th>Day</th>
             <th>Team name</th>
             <th>Match time</th>
             <th>All start times / lanes</th>
@@ -251,6 +252,7 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
           {% for row in schedule %}
           <tr class="{% if row.Is_conflict %}conflict{% endif %}{% if row.Is_pending_schedule %} pending{% endif %}">
             <td>{{ row.Date_display }}</td>
+            <td>{{ row.Day_display }}</td>
             <td>{{ row['Team name'] }}</td>
             <td>{{ row['Match time'] }}</td>
             <td>
@@ -802,6 +804,9 @@ def build_schedule(urls):
 
     # Date display string, e.g., "Apr 15"
     out_df['Date_display'] = out_df['Date'].dt.strftime('%b %d').str.replace(' 0', ' ', regex=False)
+
+    # Day of week column, e.g., "Mon"
+    out_df['Day_display'] = out_df['Date'].dt.strftime('%a')
 
     return out_df
 
