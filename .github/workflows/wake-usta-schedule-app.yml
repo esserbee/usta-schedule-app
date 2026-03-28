@@ -10,6 +10,6 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Render app
+      - name: Ping Render app every 15 mins
         run: |
           curl -sS https://usta-schedule-organizer.sudiptarbiswas.com/ || echo "Ping failed"
