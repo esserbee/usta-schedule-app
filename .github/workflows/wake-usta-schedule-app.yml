@@ -1,4 +1,4 @@
-name: Wake USTA tools app
+name: Wake USTA Schedule App
 
 on:
   schedule:
