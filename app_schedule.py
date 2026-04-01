@@ -543,8 +543,9 @@ def extract_location_from_all_start_times_cell(cell_text):
     # Handles: Calmont HS, Calmont High School, calmont hs, calmont high, etc.
     # Example: "at Calmont HS (Cts. 2-6)" -> "Calmont High School"
     #          "at calmont high" -> "Calmont High School"
+    # First exclude common words like "at", "all" from being the captured name
     m = re.search(
-        r'\b[Aa]t\s+([A-Za-z]+(?:\s+[A-Za-z]+)*)\s+(HS|hs|Hs|hS|MS|ms|Ms|mS|ES|es|Es|eS|[Hh]igh\s+[Ss]chool|[Hh]igh)\b',
+        r'\b[Aa]t\s+((?!at\b|all\b)[A-Za-z]+(?:\s+(?!at\b|all\b)[A-Za-z]+)*)\s+(HS|hs|Hs|hS|MS|ms|Ms|mS|ES|es|Es|eS|[Hh]igh\s+[Ss]chool|[Hh]igh)\b',
         t_wo_times
     )
     if m:
