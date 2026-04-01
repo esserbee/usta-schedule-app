@@ -495,8 +495,9 @@ def extract_location_from_all_start_times_cell(cell_text):
     # ── Pattern 5 ──────────────────────────────────────────────────────
     # "<ProperNoun> cts <digits>"  (case-insensitive "cts")
     # Example: "Cubberley cts 1/2/3" -> "Cubberley Center"
+    # Also handles: "Cubberley #1~#3" (with # prefix and ~ separator)
     m = re.search(
-        r'\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+[Cc]ts\s+[\d/\\\-]',
+        r'\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+(?:[Cc]ts\s+)?#?[\d~#/,\\\-]+',
         t_wo_times
     )
     if m:
@@ -535,6 +536,22 @@ def extract_location_from_all_start_times_cell(cell_text):
         if is_valid_location(name):
             if name.lower().startswith('stc'):
                 return 'Sunnyvale Tennis Center'
+            return name
+
+    # ── Pattern 8 ──────────────────────────────────────────────────────
+    # "at <Name> HS/MS/ES or High School variations"
+    # Handles: Calmont HS, Calmont High School, calmont hs, calmont high, etc.
+    # Example: "at Calmont HS (Cts. 2-6)" -> "Calmont High School"
+    #          "at calmont high" -> "Calmont High School"
+    m = re.search(
+        r'\b[Aa]t\s+([A-Za-z]+(?:\s+[A-Za-z]+)*)\s+(HS|hs|Hs|hS|MS|ms|Ms|mS|ES|es|Es|eS|[Hh]igh\s+[Ss]chool|[Hh]igh)\b',
+        t_wo_times
+    )
+    if m:
+        school_abbr = m.group(2).lower().replace('high school', 'hs').replace('high', 'hs')
+        school_type = {'hs': 'High School', 'ms': 'Middle School', 'es': 'Elementary School'}
+        name = m.group(1).strip().title() + ' ' + school_type.get(school_abbr, m.group(2))
+        if is_valid_location(name):
             return name
 
     return ''
