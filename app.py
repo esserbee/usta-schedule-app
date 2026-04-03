@@ -78,7 +78,6 @@ HTML_TEMPLATE = """
     #stats-results .clear-button:hover { background-color: #8b1f1f !important; }
     #schedule-landing button[type="submit"],
     #schedule-landing .clear-button { min-width: 170px; }
-    .download-frame { display: none; width: 0; height: 0; border: 0; }
     .stats-table .grand-total { background-color: #e8f4f8; font-weight: bold; }
     .stats-table .grand-total td { border-top: 2px solid #01696f; }
     .help { font-size: 0.9rem; color: #666; margin-top: -0.5rem; margin-bottom: 1rem; }
@@ -361,6 +360,21 @@ HTML_TEMPLATE = """
       var forms = document.querySelectorAll('#schedule-results form, #stats-results form');
       forms.forEach(function(form) {
         if (form.getAttribute('action') === '/download' || form.getAttribute('action') === '/calendar') {
+          if (!form.dataset.bound) {
+            form.dataset.bound = 'true';
+            form.addEventListener('submit', function() {
+              var btn = form.querySelector('button[type="submit"]');
+              if (btn) {
+                btn.dataset.originalText = btn.textContent;
+                btn.disabled = true;
+                btn.textContent = 'Preparing...';
+                setTimeout(function() {
+                  btn.disabled = false;
+                  btn.textContent = btn.dataset.originalText;
+                }, 2000);
+              }
+            });
+          }
           return;
         }
         if (!form.dataset.bound) {
@@ -463,7 +477,6 @@ def _extract_results_only(html_string):
 
     return ('<div class="app-container">\n'
             + inner
-            + '\n<iframe name="download-frame" class="download-frame" aria-hidden="true" tabindex="-1"></iframe>'
             + '\n<button class="clear-button" onclick="clearAll()">Clear</button>'
             + '\n</div>')
 

@@ -58,7 +58,6 @@ HTML_TEMPLATE = """<!doctype html>
     .footnote-link:hover { text-decoration: underline; }
     .actions { margin-top: 1rem; }
     .actions form { display: inline-block; margin-right: 0.75rem; }
-    .download-frame { display: none; width: 0; height: 0; border: 0; }
     .team-list label { font-weight: 400; }
     fieldset { border: 1px solid #ddd; padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
     legend { padding: 0 0.25rem; font-weight: 600; }
@@ -270,14 +269,14 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
         </tbody>
       </table>
       <div class="actions">
-        <form method="post" action="/download" target="download-frame">
+        <form method="post" action="/download">
           <input type="hidden" name="urls" value="{{ urls_value | e }}">
           <input type="hidden" name="mode" value="{{ mode }}">
           <input type="hidden" name="profile_url" value="{{ profile_url | e }}">
           <input type="hidden" name="schedule_json" value='{{ schedule | tojson | e }}'>
           <button type="submit">Download Excel Schedule</button>
         </form>
-        <form method="post" action="/calendar" target="download-frame">
+        <form method="post" action="/calendar">
           <input type="hidden" name="schedule_json" value='{{ schedule | tojson | e }}'>
           <button type="submit">Add Schedule to Calendar</button>
         </form>
@@ -285,8 +284,6 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
     </div>
   </div>
   {% endif %}
-
-  <iframe name="download-frame" class="download-frame" aria-hidden="true" tabindex="-1"></iframe>
 
   <script>
     function toggleModeInputs() {
@@ -337,17 +334,21 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
       });
     }
 
-    const downloadForm = document.querySelector('form[action="/download"]');
-    if (downloadForm) {
-      downloadForm.addEventListener('submit', function() {
-        const button = downloadForm.querySelector('button[type="submit"]');
+    const downloadForms = document.querySelectorAll('form[action="/download"], form[action="/calendar"]');
+    downloadForms.forEach(form => {
+      form.addEventListener('submit', function() {
+        const button = form.querySelector('button[type="submit"]');
         if (button) {
           button.dataset.originalText = button.textContent;
           button.disabled = true;
-          button.textContent = 'Preparing download...';
+          button.textContent = 'Preparing...';
+          setTimeout(() => {
+            button.disabled = false;
+            button.textContent = button.dataset.originalText;
+          }, 2000);
         }
       });
-    }
+    });
 
     document.querySelectorAll('input[name="mode"]').forEach((el) => {
       el.addEventListener('change', toggleModeInputs);
@@ -1085,7 +1086,12 @@ def schedule_download():
     # Write to in-memory Excel
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        columns_to_export = ['Date', 'Team name', 'Match time', 'All start times / lanes', 'Opponent team', 'Home/Away', 'Location']
+        if 'Date' in out_df.columns:
+            out_df['Day'] = out_df['Date'].dt.strftime('%a')
+        else:
+            out_df['Day'] = ''
+
+        columns_to_export = ['Date', 'Day', 'Team name', 'Match time', 'All start times / lanes', 'Opponent team', 'Home/Away', 'Location']
 
         # Ensure the exported text matches the web table:
         # - pending rows show the message instead of the raw "All start times / lanes" value
@@ -1113,6 +1119,7 @@ def schedule_download():
 
         col_widths = {
             'Date': 10,
+            'Day': 6,
             'Team name': 28,
             'Match time': 14,
             'All start times / lanes': 70,
