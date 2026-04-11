@@ -3,3 +3,6 @@ debug_profile.html
 __pycache__/app_stat.cpython-312.pyc
 .gitignore
 test_location.py
+Dockerfile
+.dockerignore
+GCP_DEPLOY_STEPS.md

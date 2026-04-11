@@ -7,29 +7,31 @@ A web application for USTA NorCal tennis players and team captains with two main
 Combine league match schedules from multiple teams and detect scheduling conflicts.
 
 **Features:**
-- Input via player profile URL (auto-discover teams) or direct team URLs
-- Smart location parsing from match details
-- Visual conflict highlighting for overlapping matches
-- Export schedules to Excel with formatting
-- Color-coded home/away status
+- ✨ Input via player profile URL (auto-discover teams) or direct team URLs
+- 🚀 Export directly to your Calendar (.ics format) or formatted Excel (.xlsx) files
+- 📍 Smart location parsing and home/away status detection
+- ⚖️ Visual highlight markers for overlapping match conflicts
 
 ## 📊 Player Statistics
 
 Extract and display career statistics from USTA NorCal player profiles.
 
 **Features:**
-- Year-by-year win/loss records and percentages
-- Breakdown by match type (singles/doubles, regular/postseason)
-- Grand totals across all years
-- Detailed team participation history
+- 📈 Year-by-year win/loss records and percentages
+- 🎾 Breakdown by match type (singles/doubles, regular/postseason)
+- 🧮 Grand totals across all active years
+- 👟 Detailed team participation history
 
-## Setup & Usage
+## Setup & Deployment
 
+**Local Usage:**
 ```bash
-pip install flask requests pandas beautifulsoup4 openpyxl
+pip install -r requirements.txt
 python app.py
 ```
+Visit `http://localhost:5000`. Enter your USTA profile or team URLs to get started.
 
-Visit `http://localhost:5000` and choose between the two tools. Enter your USTA profile or team URLs to get started.
+**Cloud / Docker Deployment:**
+This application is fully containerized. A `Dockerfile` and `gunicorn` configuration are provided for zero-config deployments to services like Google Cloud Run or AWS.
 
-**Note:** Requires valid USTA NorCal player profile or team info page URLs.
+> **Note:** Requires valid USTA NorCal player profile or team info page URLs. 
