@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 from datetime import datetime
-from urllib.parse import urljoin
+from urllib.parse import urljoin, quote
 from flask import Flask, render_template_string, request
 
 
@@ -45,6 +45,8 @@ HTML_TEMPLATE = """<!doctype html>
     .stats-table .grand-total td { border-top: 2px solid #01696f; }
     .help { font-size: 0.9rem; color: #666; margin-top: -0.5rem; margin-bottom: 1rem; }
     .loading { margin-top: 1rem; padding: 0.85rem 1rem; border: 1px solid #cfe5e7; background: #eef8f9; border-radius: 4px; color: #014e54; font-weight: 600; }
+    .rating-badge { display: inline-block; background: #01696f; color: white; padding: 0.25rem 0.75rem; border-radius: 20px; font-weight: 700; margin-left: 0.5rem; vertical-align: middle; font-size: 0.9rem; }
+    .tr-section { border-top: 1px solid #eee; margin-top: 2rem; padding-top: 2rem; }
     .name-search-row { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
     .name-search-row > div { flex: 1; min-width: 160px; }
     .radio-label { display: flex; align-items: center; gap: 0.5rem; font-weight: normal; cursor: var(--tennis-cursor); }
@@ -60,6 +62,12 @@ HTML_TEMPLATE = """<!doctype html>
     .expired-row { opacity: 0.65; }
     .clear-button { background-color: transparent; border: 1px solid #01696f; color: #01696f; }
     .clear-button:hover { background-color: #f0f8f8; }
+    
+    .rating-container { display: flex; gap: 1.5rem; margin-bottom: 2.5rem; flex-wrap: wrap; }
+    .rating-card { background: #fff; border: 1.5px solid #01696f15; padding: 1.25rem; border-radius: 12px; flex: 1; min-width: 200px; text-align: center; box-shadow: 0 4px 12px rgba(1, 105, 111, 0.05); }
+    .rating-label { font-size: 0.78rem; color: #666; text-transform: uppercase; font-weight: 700; letter-spacing: 0.08rem; margin-bottom: 0.75rem; display: block; }
+    .rating-value { font-size: 2.2rem; font-weight: 850; color: #01696f; line-height: 1; }
+    .rating-meta { font-size: 0.8rem; color: #888; margin-top: 0.5rem; display: block; font-weight: 500; }
 
     @media (max-width: 768px) {
       body { padding: 1rem; }
@@ -166,7 +174,7 @@ HTML_TEMPLATE = """<!doctype html>
           <div class="help">Enter your USTA NorCal player profile URL to extract career statistics.</div>
         </div>
         
-        <button type="submit">Analyze Statistics</button>
+        <button type="submit">{% if mode == 'search' %}Search{% else %}Analyze Statistics{% endif %}</button>
       </form>
 
       <div id="loading-message" class="loading" style="display:none;" aria-live="polite">Analyzing player statistics... please wait.</div>
@@ -183,7 +191,7 @@ HTML_TEMPLATE = """<!doctype html>
   <div class="results">
     <div class="app-container">
       <h2>Select your profile</h2>
-      <p class="embedded-intro-copy">Found {{ profile_choices | length }} result(s) for <strong>{{ search_query }}</strong>. Select the correct profile below.</p>
+      <p class="embedded-intro-copy">Found {{ profile_choices | length }} result(s) for <strong>{{ search_query }}</strong>. Select the correct profile below to analyze USTA career stats and <strong>Tennis Record ratings</strong>.</p>
       <form id="profile-select-form" method="post" action="/analyze">
         <fieldset style="border:none; padding:0; margin:0;">
           <input type="hidden" name="mode" value="profile">
@@ -191,7 +199,8 @@ HTML_TEMPLATE = """<!doctype html>
           {% for p in profile_choices %}
             <li class="{% if p.expired %}expired-row{% endif %}">
               <label>
-                <input type="radio" name="profile_url" value="{{ p.url }}" {% if loop.first and not p.expired %}checked{% endif %}>
+                <input type="radio" name="profile_url" value="{{ p.url }}" {% if loop.first and not p.expired %}checked{% endif %} onchange="document.getElementById('verified_name_{{ loop.index }}').checked = true;">
+                <input type="radio" id="verified_name_{{ loop.index }}" name="verified_name" value="{{ p.name }}" {% if loop.first and not p.expired %}checked{% endif %} style="display:none;">
                 <span>
                   <span class="profile-name">{{ p.name }}</span>
                   {% if p.city %}<span class="profile-meta"> &mdash; {{ p.city }}</span>{% endif %}
@@ -215,6 +224,20 @@ HTML_TEMPLATE = """<!doctype html>
   <div class="results">
     <div class="app-container">
     <h2>{{ player_name }} - Career Statistics</h2>
+    
+    <div class="rating-container">
+      <div class="rating-card">
+        <span class="rating-label">USTA NorCal Rating</span>
+        <span class="rating-value">{{ usta_rating or 'N/A' }}</span>
+        <span class="rating-meta">Official NTRP Level</span>
+      </div>
+      <div class="rating-card">
+        <span class="rating-label">Tennis Record Rating</span>
+        <span class="rating-value">{{ tr_stats.rating or 'N/A' }}</span>
+        <span class="rating-meta">Estimated Dynamic</span>
+      </div>
+    </div>
+
     <p class="help">Statistics extracted from player profile. Data includes all teams and divisions across all years.</p>
     <table class="stats-table">
       <thead>
@@ -291,6 +314,76 @@ HTML_TEMPLATE = """<!doctype html>
       </tbody>
     </table>
     {% endif %}
+
+    {% if tr_stats %}
+    <div class="tr-section">
+      <h3>Tennis Record Highlights</h3>
+      <p class="help">Detailed career statistics (All Years) from <a href="{{ tr_stats.url }}" target="_blank">TennisRecord.com</a>.</p>
+      
+      {% if tr_stats.yearly_record %}
+      <div style="overflow-x: auto;">
+        <table class="stats-table" style="font-size: 0.85rem;">
+          <thead>
+            <tr>
+              <th rowspan="2">Year</th>
+              <th colspan="4">Matches</th>
+              <th colspan="4">Sets</th>
+              <th colspan="4">Games</th>
+              <th rowspan="2">Def</th>
+            </tr>
+            <tr>
+              <th>Tot</th><th>W</th><th>L</th><th>%</th>
+              <th>Tot</th><th>W</th><th>L</th><th>%</th>
+              <th>Tot</th><th>W</th><th>L</th><th>%</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in tr_stats.yearly_record %}
+            <tr {% if row.is_total %}class="grand-total"{% endif %}>
+              <td><strong>{{ row.year }}</strong></td>
+              <td>{{ row.m_tot }}</td><td>{{ row.m_w }}</td><td>{{ row.m_l }}</td><td>{{ row.m_pct }}</td>
+              <td>{{ row.s_tot }}</td><td>{{ row.s_w }}</td><td>{{ row.s_l }}</td><td>{{ row.s_pct }}</td>
+              <td>{{ row.g_tot }}</td><td>{{ row.g_w }}</td><td>{{ row.g_l }}</td><td>{{ row.g_pct }}</td>
+              <td>{{ row.defaults }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="help">Connected to profile, but no non-zero match records were found.</p>
+      {% endif %}
+    </div>
+    {% elif tr_choices %}
+    <div class="tr-section">
+      <h3>Match with Tennis Record</h3>
+      <p class="help">Select your profile on TennisRecord.com to extract your dynamic rating and full career history (all years).</p>
+      <form id="tr-select-form" method="post" action="/analyze">
+        <input type="hidden" name="mode" value="profile">
+        <input type="hidden" name="profile_url" value="{{ profile_url }}">
+        <ul class="profile-results-list">
+        {% for tp in tr_choices %}
+          <li>
+            <label>
+              <input type="radio" name="tr_url" value="{{ tp.url }}" {% if loop.first %}checked{% endif %}>
+              <span>
+                <span class="profile-name">{{ tp.name }}</span>
+                <span class="profile-meta"> &mdash; {{ tp.location }}</span>
+                {% if tp.ntrp %}<span class="profile-meta"> &middot; Rating: <strong>{{ tp.ntrp }}</strong></span>{% endif %}
+              </span>
+            </label>
+          </li>
+        {% endfor %}
+        </ul>
+        <button type="submit">Connect & Extract All TR Data</button>
+      </form>
+    </div>
+    {% else %}
+    <div class="tr-section">
+      <h3>Tennis Record Highlights</h3>
+      <p class="help">Could not find any profiles matching "<strong>{{ player_name }}</strong>" on TennisRecord.com.</p>
+    </div>
+    {% endif %}
     </div>
   </div>
   {% endif %}
@@ -350,7 +443,7 @@ HTML_TEMPLATE = """<!doctype html>
               document.close();
             })
             .catch(err => {
-              if (btn) { btn.disabled = false; btn.textContent = 'Analyze Statistics'; }
+              if (btn) { btn.disabled = false; btn.textContent = 'Search'; }
               if (loadingEl) loadingEl.style.display = 'none';
               alert('Search failed: ' + err.message);
             });
@@ -398,15 +491,15 @@ def extract_player_name_from_profile(html):
 
     blacklist = {
         'usta', 'northern', 'california', 'norcal', 'login', 'join', 'search', 'calendar',
-        'play', 'improve', 'stay current', 'coach', 'organize', 'organize', 'pro tennis',
-        'captain', 'email', 'administrator'
+        'play', 'improve', 'stay current', 'coach', 'organize', 'pro tennis',
+        'captain', 'email', 'administrator', 'what type of rating'
     }
 
     def clean(txt):
         return re.sub(r'\s+', ' ', (txt or '').strip())
 
     # Common: name appears near the top in <b>/<strong> inside a header table.
-    candidate_re = re.compile(r"^[A-Z][a-zA-Z.\-']+(?:\s+[A-Z][a-zA-Z.\-']+)+$")
+    candidate_re = re.compile(r"^[A-Z][a-zA-Z.\-']+(?:\s+[A-Za-z.\-']+)+$")
 
     for tag in soup.find_all(['strong', 'b']):
         txt = clean(tag.get_text(' ', strip=True))
@@ -417,7 +510,7 @@ def extract_player_name_from_profile(html):
         low = txt.lower()
         if any(b in low for b in blacklist):
             continue
-        if candidate_re.match(txt):
+        if candidate_re.match(txt) or (',' in txt and len(txt.split()) >= 2):
             return txt
 
     # Fallback: regex across whole page text (first plausible "First Last" name).
@@ -426,7 +519,40 @@ def extract_player_name_from_profile(html):
     if m:
         return m.group(1).strip()
 
-    return ''
+    return 'Unknown Player'
+
+
+def extract_usta_rating_from_profile(html):
+    """Extraction of the NTRP rating from the USTA profile header."""
+    soup = BeautifulSoup(html, 'html.parser')
+    popup_link = soup.find('a', href=re.compile(r'ratingtypes\.asp', re.I))
+    
+    def normalize_rating(raw):
+        if not raw: return raw
+        raw = raw.replace('(', '').replace(')', '').strip()
+        # If it matches "C 3.5", flip it to "3.5 C"
+        flip_match = re.search(r'^([A-Z])\s*(\d\.\d)$', raw, re.I)
+        if flip_match:
+            return f"{flip_match.group(2)} {flip_match.group(1).upper()}"
+        return raw
+
+    if popup_link:
+        # The rating value is typically in the previous sibling (text node)
+        prev = popup_link.previous_sibling
+        if prev:
+            txt = prev.get_text() if hasattr(prev, 'get_text') else str(prev)
+            # Support both "C 3.5" and "3.5 C" and "3.5(C)" etc.
+            match = re.search(r'([A-Z\(\)\-]{0,3}\s*\d\.\d\s*[A-Z\(\)\-]{0,3})', txt)
+            if match:
+                return normalize_rating(match.group(1))
+                
+    # Fallback: Scrape entire text for specific pattern
+    all_text = soup.get_text(" ", strip=True)
+    match = re.search(r'([A-Z\(\)\-]{0,3}\s*\d\.\d\s*[A-Z\(\)\-]{0,3})\s*What type of rating is this\?', all_text, re.I)
+    if match:
+        return normalize_rating(match.group(1))
+        
+    return None
 
 
 def parse_match_results_from_profile(html, player_name):
@@ -646,6 +772,217 @@ def compute_player_statistics(all_matches, player_name):
     return stats_by_year, grand_total
 
 
+def search_tennis_record_profiles(player_name):
+    """Search for player profiles on TennisRecord.com and return a list of matches."""
+    import requests
+    from bs4 import BeautifulSoup
+    
+    clean_name = player_name.strip()
+    tr_name = clean_name
+    if ',' in clean_name:
+        parts = clean_name.split(',')
+        if len(parts) == 2:
+            tr_name = f"{parts[1].strip()} {parts[0].strip()}"
+    
+    # "First M Last" -> "First Last" variation
+    simple_name = re.sub(r'\s+[A-Z]\.\s+', ' ', tr_name)
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Referer': 'https://www.tennisrecord.com/adult/search.aspx'
+    }
+    
+    profiles = []
+    seen_urls = set()
+    
+    for name_query in [tr_name, simple_name]:
+        if name_query in seen_urls: continue
+        seen_urls.add(name_query)
+        
+        url = f"https://www.tennisrecord.com/adult/profile.aspx?playername={quote(name_query)}"
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code != 200: continue
+            
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            
+            # If multiple results, TR shows a table with matches
+            if "Multiple players found" in resp.text or "Matches and Searches" in resp.text:
+                table = soup.find('table', {'class': 'grid'}) or soup.find('table')
+                if table:
+                    rows = table.find_all('tr')[1:] # Skip header
+                    for row in rows:
+                        tds = row.find_all('td')
+                        if len(tds) >= 2:
+                            a = tds[0].find('a', href=True)
+                            if a:
+                                p_url = urljoin(url, a['href'])
+                                if p_url not in [p['url'] for p in profiles]:
+                                    profiles.append({
+                                        'name': a.get_text(strip=True),
+                                        'location': tds[1].get_text(strip=True),
+                                        'ntrp': tds[3].get_text(strip=True) if len(tds) > 3 else '',
+                                        'url': p_url
+                                    })
+            elif "Estimated Dynamic Rating" in resp.text:
+                # Direct hit
+                profiles.append({
+                    'name': name_query,
+                    'location': 'Direct Match',
+                    'url': url,
+                    'ntrp': ''
+                })
+        except:
+            continue
+            
+    return profiles
+
+
+def scrape_tr_profile_all_years(url):
+    """Scrape detailed stats from a TR profile URL using the yr=1 parameter."""
+    import requests
+    from bs4 import BeautifulSoup
+    
+    # Ensure yr=1 is in the URL to get all years
+    final_url = url
+    if 'yr=1' not in final_url:
+        sep = '&' if '?' in final_url else '?'
+        final_url = f"{final_url}{sep}yr=1"
+        
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Referer': 'https://www.tennisrecord.com/adult/search.aspx'
+    }
+    
+    try:
+        resp = requests.get(final_url, headers=headers, timeout=12)
+        if resp.status_code != 200: return None
+        
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        
+        # 1. Rating Extraction
+        rating = None
+        all_text = soup.get_text(" ", strip=True)
+        match = re.search(r'Estimated Dynamic Rating\s*:?\s*(\d\.\d{4})', all_text, re.I)
+        if match:
+            rating = match.group(1)
+            
+        # Yearly Records Extraction - More Robust
+        tr_stats = []
+        tables = soup.find_all('table')
+        
+        for table in tables:
+            rows = table.find_all('tr')
+            for row in rows:
+                cells = row.find_all(['td', 'th'])
+                if len(cells) >= 5:
+                    row_data = [c.get_text(strip=True) for c in cells]
+                    year_val = ""
+                    is_total_row = False
+                    
+                    # Detect Year or Summary Row
+                    for i in range(min(2, len(row_data))):
+                        val = row_data[i]
+                        # 1. Look for 4-digit years
+                        if val.isdigit() and len(val) == 4 and 1990 < int(val) < 2040:
+                            year_val = val
+                            break
+                        # 2. Look for the SUMMARY row (usually labeled 'Totals', 'Career', or 'Grand Total')
+                        # We use a stricter check to avoid catching header labels like 'Total Matches'
+                        elif val.lower() in ["totals", "career", "career totals", "grand total"]:
+                            year_val = "Total"
+                            is_total_row = True
+                            break
+                    
+                    if year_val:
+                        # Extract all columns (Total M, W, L, % | Total S, W, L, % | Total G, W, L, % | Def)
+                        # We expect 13 columns after year if full table, but at least 4 for basic
+                        try:
+                            # Skip years with 0 matches unless it's the Total row
+                            m_tot = row_data[i+1]
+                            if m_tot == "0" and not is_total_row:
+                                continue
+                                
+                            tr_stats.append({
+                                'year': year_val,
+                                'is_total': is_total_row,
+                                # Matches
+                                'm_tot': m_tot,
+                                'm_w': row_data[i+2],
+                                'm_l': row_data[i+3],
+                                'm_pct': row_data[i+4],
+                                # Sets
+                                's_tot': row_data[i+5] if len(row_data) > i+5 else '',
+                                's_w': row_data[i+6] if len(row_data) > i+6 else '',
+                                's_l': row_data[i+7] if len(row_data) > i+7 else '',
+                                's_pct': row_data[i+8] if len(row_data) > i+8 else '',
+                                # Games
+                                'g_tot': row_data[i+9] if len(row_data) > i+9 else '',
+                                'g_w': row_data[i+10] if len(row_data) > i+10 else '',
+                                'g_l': row_data[i+11] if len(row_data) > i+11 else '',
+                                'g_pct': row_data[i+12] if len(row_data) > i+12 else '',
+                                # Defaults
+                                'defaults': row_data[i+13] if len(row_data) > i+13 else ''
+                            })
+                        except:
+                            pass
+            
+            if tr_stats:
+                break
+        
+        # Post-process: Calculate Totals if not found during scrape
+        if tr_stats and not any(r.get('is_total') for r in tr_stats):
+            try:
+                m_tot = m_w = m_l = 0
+                s_tot = s_w = s_l = 0
+                g_tot = g_w = g_l = 0
+                defs = 0
+                for r in tr_stats:
+                    m_tot += int(re.sub(r'\D', '', r['m_tot'])) if r['m_tot'] else 0
+                    m_w += int(re.sub(r'\D', '', r['m_w'])) if r['m_w'] else 0
+                    m_l += int(re.sub(r'\D', '', r['m_l'])) if r['m_l'] else 0
+                    s_tot += int(re.sub(r'\D', '', r['s_tot'])) if r['s_tot'] else 0
+                    s_w += int(re.sub(r'\D', '', r['s_w'])) if r['s_w'] else 0
+                    s_l += int(re.sub(r'\D', '', r['s_l'])) if r['s_l'] else 0
+                    g_tot += int(re.sub(r'\D', '', r['g_tot'])) if r['g_tot'] else 0
+                    g_w += int(re.sub(r'\D', '', r['g_w'])) if r['g_w'] else 0
+                    g_l += int(re.sub(r'\D', '', r['g_l'])) if r['g_l'] else 0
+                    defs += int(re.sub(r'\D', '', r['defaults'])) if r['defaults'] else 0
+                
+                tr_stats.append({
+                    'year': 'Total',
+                    'is_total': True,
+                    'm_tot': str(m_tot), 'm_w': str(m_w), 'm_l': str(m_l), 'm_pct': f"{(m_w/m_tot*100):.1f}" if m_tot else '0.0',
+                    's_tot': str(s_tot), 's_w': str(s_w), 's_l': str(s_l), 's_pct': f"{(s_w/s_tot*100):.1f}" if s_tot else '0.0',
+                    'g_tot': str(g_tot), 'g_w': str(g_w), 'g_l': str(g_l), 'g_pct': f"{(g_w/g_tot*100):.1f}" if g_tot else '0.0',
+                    'defaults': str(defs)
+                })
+            except:
+                pass
+
+        # Determine player name for display
+        player_name = "Player"
+        name_search = soup.find(['h1', 'h2', 'strong']) # Look for big headers
+        if name_search:
+            player_name = name_search.get_text(strip=True)
+        else:
+            # Fallback to parsingจาก URL
+            name_match = re.search(r'playername=([^&]+)', final_url)
+            if name_match:
+                from urllib.parse import unquote
+                player_name = unquote(name_match.group(1))
+
+        return {
+            'rating': rating,
+            'yearly_record': tr_stats,
+            'url': final_url,
+            'player_name': player_name
+        }
+    except:
+        return None
+
+
 def search_player_by_name_stats():
     first_name = request.form.get('first_name', '').strip()
     last_name  = request.form.get('last_name', '').strip()
@@ -831,6 +1168,7 @@ def stats_analyze():
         )
 
     player_name = extract_player_name_from_profile(resp.text).strip()
+    usta_rating = extract_usta_rating_from_profile(resp.text)
     
     # Parse match results from player profile
     try:
@@ -853,6 +1191,23 @@ def stats_analyze():
             'by_year': stats_by_year,
             'grand_total': grand_total
         }
+
+        # Handle Tennis Record connection
+        tr_stats = None
+        tr_choices = None
+        tr_url = request.form.get('tr_url')
+        
+        # Use verified name if available, otherwise fallback to extracted name
+        tr_search_name = request.form.get('verified_name') or player_name
+        
+        if tr_url:
+            tr_stats = scrape_tr_profile_all_years(tr_url)
+        else:
+            tr_choices = search_tennis_record_profiles(tr_search_name)
+            # If search returns exactly one, just auto-scrape it
+            if tr_choices and len(tr_choices) == 1:
+                tr_stats = scrape_tr_profile_all_years(tr_choices[0]['url'])
+                tr_choices = None
         
         return render_template_string(
             HTML_TEMPLATE,
@@ -861,7 +1216,10 @@ def stats_analyze():
             profile_url=profile_url,
             player_stats=player_stats,
             player_name=player_name,
-            team_details=all_matches
+            usta_rating=usta_rating,
+            team_details=all_matches,
+            tr_stats=tr_stats,
+            tr_choices=tr_choices
         )
         
     except Exception as e:

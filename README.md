@@ -1,37 +1,49 @@
-# USTA NorCal League Tools
+# 🎾 USTA NorCal League Tools
 
-A web application for USTA NorCal tennis players and team captains with two main tools:
+A premium web suite for USTA NorCal tennis players and captains to manage schedules and analyze statistics effortlessly. 
 
-## 📅 Schedule Organizer
+## ✨ Key Features
 
-Combine league match schedules from multiple teams and detect scheduling conflicts.
+### 📅 Unified Schedule Organizer (`app_schedule.py`)
+Combine match schedules from multiple teams into one clean, conflict-aware interface.
+- **Player Name Search:** Find your USTA profile instantly by searching for your first or last name. No more hunting for URLs!
+- **Conflict Detection:** Visual highlighting of overlapping matches to help you manage your availability.
+- **Export Options:** 
+  - 📆 **Calendar:** One-click download of `.ics` files to sync with Apple/Google/Microsoft calendars.
+  - 📊 **Excel:** Clean, sorted `.xlsx` exports for offline sharing and tracking.
+- **Smart Parsing:** Automatic detection of home/away status, location parsing, and start times.
 
-**Features:**
-- ✨ Input via player profile URL (auto-discover teams) or direct team URLs
-- 🚀 Export directly to your Calendar (.ics format) or formatted Excel (.xlsx) files
-- 📍 Smart location parsing and home/away status detection
-- ⚖️ Visual highlight markers for overlapping match conflicts
+### 📊 Comprehensive Career Stats (`app_stat.py`)
+Deep-dive into your historical performance data extracted directly from USTA NorCal records.
+- **Name Search Integration:** Search by name to pull your full performance history.
+- **Tennis Record Integration:** Automatically pulls your **Estimated Dynamic Rating** and yearly win/loss record from TennisRecord.com for cross-reference.
+- **Yearly Performance:** Year-by-year wins, losses, and win percentages.
+- **Match Breakdown:** Detailed metrics for singles vs. doubles and regular season vs. postseason.
+- **Team History:** Review every team you've played for, including captaincy roles and playoff runs.
 
-## 📊 Player Statistics
+## 🚀 Getting Started
 
-Extract and display career statistics from USTA NorCal player profiles.
+### Prerequisites
+- Python 3.10+
+- `pip`
 
-**Features:**
-- 📈 Year-by-year win/loss records and percentages
-- 🎾 Breakdown by match type (singles/doubles, regular/postseason)
-- 🧮 Grand totals across all active years
-- 👟 Detailed team participation history
+### Local Installation
+1. Clone the repository and navigate to the directory.
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Run the unified application:
+   ```bash
+   python app.py
+   ```
+4. Open your browser to `http://localhost:5000`.
 
-## Setup & Deployment
+### Using the Search
+The application supports a flexible search system:
+- **Last Name Only:** e.g., "Doe"
+- **First Name Only:** e.g., "John" (uses a specialized query format for USTA compatibility)
+- **Full Name:** e.g., "Doe, John" for precise matching.
 
-**Local Usage:**
-```bash
-pip install -r requirements.txt
-python app.py
-```
-Visit `http://localhost:5000`. Enter your USTA profile or team URLs to get started.
-
-**Cloud / Docker Deployment:**
-This application is fully containerized. A `Dockerfile` and `gunicorn` configuration are provided for zero-config deployments to services like Google Cloud Run or AWS.
-
-> **Note:** Requires valid USTA NorCal player profile or team info page URLs. 
+---
+*Created with ❤️ for the NorCal Tennis Community.*
