@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin
 import json
 import uuid
+from html import escape as html_escape
 
 
 app = Flask(__name__)
@@ -15,6 +16,12 @@ app = Flask(__name__)
 
 HTML_TEMPLATE = """<!doctype html>
 <html lang="en">
+{# --- Default values for variables that may not always be passed --- #}
+{% set profile_choices = profile_choices if profile_choices is defined else none %}
+{% set search_query = search_query if search_query is defined else '' %}
+{% set first_name = first_name if first_name is defined else '' %}
+{% set last_name = last_name if last_name is defined else '' %}
+{% set mode = mode if mode is defined else 'profile' %}
 <head>
   <meta charset="utf-8">
   <title>USTA NorCal League Schedule Organizer</title>
@@ -32,7 +39,9 @@ HTML_TEMPLATE = """<!doctype html>
     .app-container { border: 2px solid #ddd; border-radius: 12px; padding: 2rem; margin-bottom: 2rem; background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
     label { font-weight: 600; display: block; margin-bottom: 0.25rem; }
     textarea { width: 100%; min-height: 140px; padding: 0.75rem; border-radius: 8px; border: 1px solid #ccc; font-family: monospace; font-size: 0.9rem; }
-    input[type="url"] { width: 100%; padding: 0.6rem 0.75rem; border-radius: 8px; border: 1px solid #ccc; font-size: 0.9rem; margin-bottom: 0.5rem; }
+    input[type="url"], input[type="text"] { width: 100%; padding: 0.6rem 0.75rem; border-radius: 8px; border: 1px solid #ccc; font-size: 0.9rem; margin-bottom: 0.5rem; box-sizing: border-box; }
+    .name-search-row { display: flex; gap: 0.75rem; }
+    .name-search-row > div { flex: 1; }
     button { margin-top: 1rem; padding: 0.6rem 1.2rem; border-radius: 999px; border: none; background: #01696f; color: #fff; font-weight: 600; cursor: var(--tennis-cursor); }
     button:hover { background: #0c4e54; }
     .help { font-size: 0.85rem; color: #666; margin-top: 0.25rem; }
@@ -61,6 +70,15 @@ HTML_TEMPLATE = """<!doctype html>
     .team-list label { font-weight: 400; }
     fieldset { border: 1px solid #ddd; padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
     legend { padding: 0 0.25rem; font-weight: 600; }
+    .profile-results-list { list-style: none; padding: 0; margin: 0.75rem 0; }
+    .profile-results-list li { margin-bottom: 0.5rem; }
+    .profile-results-list label { font-weight: 400; display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #e0e0e0; background: #fafafa; transition: background 0.15s; }
+    .profile-results-list label:hover { background: #eef8f9; border-color: #01696f; }
+    .profile-results-list input[type="radio"] { margin-top: 0.2rem; flex-shrink: 0; width: auto; }
+    .profile-results-list .profile-name { font-weight: 700; color: #01696f; }
+    .profile-results-list .profile-meta { font-size: 0.82rem; color: #666; }
+    .profile-results-list .profile-expired { color: #a12c2c; font-size: 0.78rem; font-style: italic; }
+    .expired-row { opacity: 0.65; }
 
     @media (max-width: 768px) {
       body { padding: 1rem; }
@@ -140,6 +158,8 @@ HTML_TEMPLATE = """<!doctype html>
       }
 
       th { line-height: 1.1; }
+
+      .name-search-row { flex-direction: column; gap: 0; }
     }
   </style>
 </head>
@@ -153,9 +173,13 @@ HTML_TEMPLATE = """<!doctype html>
         </div>
       </div>
 
-      <form method="post" action="/generate">
+      <form method="post" action="/generate" id="main-generate-form">
         <fieldset>
           <legend>Step 1: Input method</legend>
+          <label>
+            <input type="radio" name="mode" value="search" {% if mode == 'search' %}checked{% endif %}>
+            Search player by name
+          </label>
           <label>
             <input type="radio" name="mode" value="profile" {% if mode == 'profile' %}checked{% endif %}>
             Use player profile URL
@@ -165,6 +189,20 @@ HTML_TEMPLATE = """<!doctype html>
             Use individual team info URLs
           </label>
         </fieldset>
+
+        <div id="search_wrap" {% if mode != 'search' %}style="display:none"{% endif %}>
+          <div class="name-search-row">
+            <div>
+              <label for="first_name">First name (optional if last name given)</label>
+              <input type="text" id="first_name" name="first_name" placeholder="e.g. John" value="{{ first_name or '' }}" autocomplete="given-name">
+            </div>
+            <div>
+              <label for="last_name">Last name (optional if first name given)</label>
+              <input type="text" id="last_name" name="last_name" placeholder="e.g. Smith" value="{{ last_name or '' }}" autocomplete="family-name">
+            </div>
+          </div>
+          <div class="help">Search for a player on the USTA NorCal website by name.</div>
+        </div>
 
         <div id="profile_url_wrap" {% if mode != 'profile' %}style="display:none"{% endif %}>
           <label for="profile_url">Player profile URL</label>
@@ -179,7 +217,7 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
           <div class="help">Used when "Use individual team info URLs" is selected (one URL per line).</div>
         </div>
 
-        <button type="submit">Next</button>
+        <button type="submit" id="main-next-btn">Next</button>
       </form>
 
       <div id="loading-message" class="loading" style="display:none;" aria-live="polite">Combining schedule... please wait.</div>
@@ -189,6 +227,39 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
       {% endif %}
     </div>
   </div>
+
+  {% if profile_choices %}
+  <div class="results">
+    <div class="app-container">
+      <h2>Select your profile</h2>
+      <p class="embedded-intro-copy">Found {{ profile_choices | length }} result(s) for <strong>{{ search_query }}</strong>. Select the correct profile below.</p>
+      <form id="profile-select-form" method="post" action="/generate">
+        <fieldset>
+          <legend>Step 2: Choose your profile</legend>
+          <input type="hidden" name="mode" value="profile">
+          <ul class="profile-results-list">
+          {% for p in profile_choices %}
+            <li class="{% if p.expired %}expired-row{% endif %}">
+              <label>
+                <input type="radio" name="profile_url" value="{{ p.url }}" {% if loop.first and not p.expired %}checked{% endif %}>
+                <span>
+                  <span class="profile-name">{{ p.name }}</span>
+                  {% if p.city %}<span class="profile-meta"> &mdash; {{ p.city }}</span>{% endif %}
+                  {% if p.usta_number %}<span class="profile-meta"> &middot; USTA #{{ p.usta_number }}</span>{% endif %}
+                  {% if p.expired %}<span class="profile-expired"> (membership expired {{ p.expiration }})</span>{% endif %}
+                </span>
+              </label>
+            </li>
+          {% endfor %}
+          </ul>
+          <button type="submit">Use This Profile</button>
+          <button type="button" class="clear-button" onclick="if(typeof clearSearchResults === 'function') { clearSearchResults(); } else { window.location.href='/'; }" style="margin-left: 1rem;">Search Another Name</button>
+          <div id="profile-select-loading" class="loading" style="display:none;" aria-live="polite">Loading profile... please wait.</div>
+        </fieldset>
+      </form>
+    </div>
+  </div>
+  {% endif %}
 
   {% if team_choices %}
   <div class="results">
@@ -289,16 +360,15 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
     function toggleModeInputs() {
       const selected = document.querySelector('input[name="mode"]:checked');
       const mode = selected ? selected.value : 'profile';
+      const searchWrap = document.getElementById('search_wrap');
       const profileWrap = document.getElementById('profile_url_wrap');
       const urlsWrap = document.getElementById('urls_wrap');
+      const submitBtn = document.getElementById('main-next-btn');
 
-      if (mode === 'profile') {
-        profileWrap.style.display = '';
-        urlsWrap.style.display = 'none';
-      } else {
-        profileWrap.style.display = 'none';
-        urlsWrap.style.display = '';
-      }
+      if (searchWrap) searchWrap.style.display = (mode === 'search') ? '' : 'none';
+      if (profileWrap) profileWrap.style.display = (mode === 'profile') ? '' : 'none';
+      if (urlsWrap) urlsWrap.style.display = (mode === 'teams') ? '' : 'none';
+      if (submitBtn) submitBtn.textContent = (mode === 'search') ? 'Search' : 'Next';
     }
 
     function showLoadingState(form, buttonText, loadingId = 'loading-message') {
@@ -313,13 +383,55 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
       }
     }
 
-    const mainForm = document.querySelector('form[action="/generate"]');
+    const mainForm = document.getElementById('main-generate-form');
     if (mainForm) {
       mainForm.addEventListener('submit', function(e) {
+        const mode = document.querySelector('input[name="mode"]:checked');
+        if (mode && mode.value === 'search') {
+          // For search mode, POST to /search_player instead
+          e.preventDefault();
+          const firstName = document.getElementById('first_name').value.trim();
+          const lastName = document.getElementById('last_name').value.trim();
+          if (!firstName && !lastName) {
+            alert('Please enter at least a first name or last name to search.');
+            return;
+          }
+          const btn = mainForm.querySelector('button[type="submit"]');
+          if (btn) { btn.disabled = true; btn.textContent = 'Searching...'; }
+          const loadingEl = document.getElementById('loading-message');
+          if (loadingEl) {
+            loadingEl.textContent = 'Searching for player... please wait.';
+            loadingEl.style.display = 'block';
+          }
+          const fd = new FormData();
+          fd.append('first_name', firstName);
+          fd.append('last_name', lastName);
+          fetch('/search_player', { method: 'POST', body: fd })
+            .then(r => r.text())
+            .then(html => {
+              // Replace the body content with the returned full page
+              document.open();
+              document.write(html);
+              document.close();
+            })
+            .catch(err => {
+              if (btn) { btn.disabled = false; btn.textContent = 'Next'; }
+              if (loadingEl) loadingEl.style.display = 'none';
+              alert('Search failed: ' + err.message);
+            });
+        } else {
+          e.preventDefault();
+          setTimeout(function() { mainForm.submit(); }, 50);
+        }
+      });
+    }
+
+    const profileSelectForm = document.getElementById('profile-select-form');
+    if (profileSelectForm) {
+      profileSelectForm.addEventListener('submit', function(e) {
         e.preventDefault();
-        setTimeout(function() {
-          mainForm.submit();
-        }, 50);
+        showLoadingState(profileSelectForm, 'Loading...', 'profile-select-loading');
+        setTimeout(function() { profileSelectForm.submit(); }, 100);
       });
     }
 
@@ -328,9 +440,7 @@ https://leagues.ustanorcal.com/teaminfo.asp?id=109621">{{ urls_value or '' }}</t
       teamSelectForm.addEventListener('submit', function(e) {
         e.preventDefault();
         showLoadingState(teamSelectForm, 'Working...', 'team-loading-message');
-        setTimeout(function() {
-          teamSelectForm.submit();
-        }, 100);
+        setTimeout(function() { teamSelectForm.submit(); }, 100);
       });
     }
 
@@ -830,6 +940,198 @@ def build_schedule(urls):
     return out_df
 
 
+USTA_SEARCH_BASE = 'https://leagues.ustanorcal.com'
+USTA_SEARCH_URL  = 'https://leagues.ustanorcal.com/search.asp'
+
+
+def search_player_by_name():
+    """
+    POST to the USTA NorCal search page with a player name, parse results
+    and return a rendered profile-selection page.
+
+    The search form at /search.asp accepts:
+      searchcategory=1  (Player search)
+      searchtext=<last_name> <first_name>   (observed format: Last First)
+
+    Results are presented as an HTML table where each matching row contains
+    a link to playermatches.asp?id=<N>.
+    """
+    first_name = request.form.get('first_name', '').strip()
+    last_name  = request.form.get('last_name',  '').strip()
+    current_year = datetime.now().year
+
+    # Build query string — USTA NorCal search works best with "Last, First"
+    if last_name and first_name:
+        search_text = f"{last_name}, {first_name}"
+    elif last_name:
+        search_text = last_name
+    elif first_name:
+        # Trick to search by first name only on this legacy site
+        search_text = f", {first_name}"
+    else:
+        search_text = ""
+        
+    search_query = search_text.strip(', ') if search_text else ''
+    if not last_name and not first_name:
+        return render_template_string(
+            HTML_TEMPLATE,
+            message='Please enter a first name and/or last name to search.',
+            error=True,
+            mode='search',
+            first_name=first_name,
+            last_name=last_name,
+            profile_choices=None,
+            search_query='',
+            urls_value='',
+            profile_url='',
+            schedule=None,
+            team_choices=None,
+            current_year=current_year,
+            filtered_to_year=False,
+            player_name=None,
+            player_first_name=None,
+        )
+
+    try:
+        session = requests.Session()
+        session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
+        
+        # 1. Fetch the search page first to get session cookies and anti-CSRF token
+        get_resp = session.get(USTA_SEARCH_URL, timeout=15)
+        get_resp.raise_for_status()
+        get_soup = BeautifulSoup(get_resp.text, 'html.parser')
+        
+        token = ''
+        token_input = get_soup.find('input', {'name': 'token'})
+        if token_input and token_input.get('value'):
+            token = token_input.get('value')
+            
+        # 2. Perform the POST search
+        post_data = {
+            'lstsearch': '2',
+            'searchfor': '2',
+            'name': search_text,
+            'cmd': ' Search '
+        }
+        if token:
+            post_data['token'] = token
+            
+        resp = session.post(
+            USTA_SEARCH_URL,
+            data=post_data,
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        return render_template_string(
+            HTML_TEMPLATE,
+            message=f'Error contacting USTA NorCal search: {e}',
+            error=True,
+            mode='search',
+            first_name=first_name,
+            last_name=last_name,
+            profile_choices=None,
+            search_query=search_query,
+            urls_value='',
+            profile_url='',
+            schedule=None,
+            team_choices=None,
+            current_year=current_year,
+            filtered_to_year=False,
+            player_name=None,
+            player_first_name=None,
+        )
+
+    soup = BeautifulSoup(resp.text, 'html.parser')
+
+    # Find all links to playermatches.asp — each is one matched player profile.
+    profile_choices = []
+    seen_urls = set()
+    for a in soup.find_all('a', href=True):
+        href = a['href']
+        if 'playermatches.asp' not in href.lower():
+            continue
+        full_url = urljoin(USTA_SEARCH_BASE, href)
+        if full_url in seen_urls:
+            continue
+        seen_urls.add(full_url)
+
+        # Try to get surrounding row context (name, city, USTA#, expiration)
+        row = a.find_parent('tr')
+        name = a.get_text(' ', strip=True)
+        city = ''
+        usta_number = ''
+        expiration = ''
+        expired = False
+
+        if row:
+            tds = row.find_all('td')
+            cells = [td.get_text(' ', strip=True) for td in tds]
+            # Heuristic: first cell often has the name, others have city / USTA# / expiry
+            if cells:
+                name = cells[0] if cells[0] else name
+            if len(cells) >= 2:
+                city = cells[1]
+            if len(cells) >= 3:
+                # Could be USTA membership number
+                usta_number = cells[2]
+            if len(cells) >= 4:
+                expiration = cells[3]
+                # If expiration date is in the past, flag it
+                try:
+                    exp_dt = datetime.strptime(expiration, '%m/%d/%Y')
+                    if exp_dt < datetime.now():
+                        expired = True
+                except Exception:
+                    pass
+
+        profile_choices.append({
+            'url': full_url,
+            'name': name,
+            'city': city,
+            'usta_number': usta_number,
+            'expiration': expiration,
+            'expired': expired,
+        })
+
+    if not profile_choices:
+        return render_template_string(
+            HTML_TEMPLATE,
+            message=f'No players found matching "{search_query}". Try a different spelling or use the profile URL directly.',
+            error=True,
+            mode='search',
+            first_name=first_name,
+            last_name=last_name,
+            profile_choices=None,
+            search_query=search_query,
+            urls_value='',
+            profile_url='',
+            schedule=None,
+            team_choices=None,
+            current_year=current_year,
+            filtered_to_year=False,
+            player_name=None,
+            player_first_name=None,
+        )
+
+    return render_template_string(
+        HTML_TEMPLATE,
+        message=None,
+        error=False,
+        mode='search',
+        first_name=first_name,
+        last_name=last_name,
+        profile_choices=profile_choices,
+        search_query=search_query,
+        urls_value='',
+        profile_url='',
+        schedule=None,
+        team_choices=None,
+        current_year=current_year,
+        filtered_to_year=False,
+        player_name=None,
+        player_first_name=None,
+    )
 
 
 def schedule_generate():
@@ -887,6 +1189,10 @@ def schedule_generate():
             player_name=player_name,
             player_first_name=player_first_name,
         )
+
+    # Handle search mode routing directly if submitted to /generate by mistake
+    if mode == 'search':
+        return search_player_by_name()
 
     # Profile mode: fetch profile and present teams to choose
     if mode == 'profile':
@@ -1294,15 +1600,24 @@ def index():
         team_choices=None,
         current_year=datetime.now().year,
         filtered_to_year=False,
-        mode='profile',
+        mode='search',
         player_name=None,
         player_first_name=None,
+        profile_choices=None,
+        search_query='',
+        first_name='',
+        last_name='',
     )
 
 
 @app.route('/generate', methods=['POST'])
 def generate():
     return schedule_generate()
+
+
+@app.route('/search_player', methods=['POST'])
+def search_player():
+    return search_player_by_name()
 
 
 @app.route('/download', methods=['POST'])

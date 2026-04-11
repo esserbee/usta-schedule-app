@@ -6,3 +6,6 @@ test_location.py
 Dockerfile
 .dockerignore
 GCP_DEPLOY_STEPS.md
+test_search2.html
+scratch_test.py
+patch_stat.py

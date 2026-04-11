@@ -41,6 +41,8 @@ HTML_TEMPLATE = """
     input, select, textarea { width: 100%; padding: 0.5rem; margin-bottom: 1rem; border: 1px solid #ccc; border-radius: 4px; }
     button { background-color: #01696f; color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 4px; cursor: var(--tennis-cursor) !important; font-weight: 600; }
     button:hover { background-color: #014e54; }
+    .name-search-row { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+    .name-search-row > div { flex: 1; min-width: 160px; }
     .app-button { cursor: var(--tennis-cursor); }
     .clear-button { cursor: var(--tennis-cursor); }
     .status { margin-top: 1rem; padding: 0.75rem; border-radius: 4px; }
@@ -48,6 +50,15 @@ HTML_TEMPLATE = """
     .success { background-color: #e8f5e8; color: #2e7d32; border: 1px solid #c8e6c9; }
     .loading { margin-top: 1rem; padding: 0.85rem 1rem; border: 1px solid #cfe5e7; background: #eef8f9; border-radius: 4px; color: #014e54; font-weight: 600; }
     .results { margin-top: 2rem; }
+    .profile-results-list { list-style: none; padding: 0; margin: 0.75rem 0; }
+    .profile-results-list li { margin-bottom: 0.5rem; }
+    .profile-results-list label { font-weight: 400; display: flex !important; align-items: flex-start; gap: 0.5rem; cursor: pointer; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #e0e0e0; background: #fafafa; transition: background 0.15s; }
+    .profile-results-list label:hover { background: #eef8f9; border-color: #01696f; }
+    .profile-results-list input[type="radio"] { margin-top: 0.2rem; flex-shrink: 0; width: auto !important; padding: 0 !important; margin-bottom: 0 !important; }
+    .profile-results-list .profile-name { font-weight: 700; color: #01696f; }
+    .profile-results-list .profile-meta { font-size: 0.82rem; color: #666; }
+    .profile-results-list .profile-expired { color: #a12c2c; font-size: 0.78rem; font-style: italic; }
+    .expired-row { opacity: 0.65; }
     .schedule-table, .stats-table { border-collapse: collapse; width: 100%; margin-bottom: 2rem; }
     .schedule-table th, .schedule-table td, .stats-table th, .stats-table td { border: 1px solid #ddd; padding: 0.5rem; text-align: left; }
     .schedule-table th, .stats-table th { background-color: #01696f; color: white; font-weight: 600; }
@@ -196,21 +207,37 @@ HTML_TEMPLATE = """
   <div id="schedule-section" class="app-section hidden">
     <div id="schedule-landing" class="app-container">
       <h2>Schedule Organizer</h2>
-      <p>Step 1: Choose whether to use your USTA NorCal player profile or paste individual team info URLs.</p>
+      <p>Step 1: Choose whether to search by name, use your profile URL, or paste individual team info URLs.</p>
       <p>Step 2: Review the combined schedule and download an Excel file with conflicts highlighted.</p>
       <form id="schedule-form" method="post" action="/generate">
         <fieldset>
           <legend>Step 1: Input method</legend>
           <div>
             <label class="radio-label">
-              <input type="radio" name="mode" value="profile" onchange="toggleMode()" checked> Profile URL (auto-discover teams)
+              <input type="radio" name="mode" value="search" onchange="toggleMode()" checked> Search by name
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="mode" value="profile" onchange="toggleMode()"> Profile URL (auto-discover teams)
             </label>
             <label class="radio-label">
               <input type="radio" name="mode" value="teams" onchange="toggleMode()"> Manual team URLs
             </label>
           </div>
         </fieldset>
-        <div id="profile-input">
+        <div id="search-input">
+          <div class="name-search-row">
+            <div>
+              <label for="sched_first_name">First name (optional if last name given)</label>
+              <input type="text" id="sched_first_name" name="first_name" placeholder="e.g. John" autocomplete="given-name">
+            </div>
+            <div>
+              <label for="sched_last_name">Last name (optional if first name given)</label>
+              <input type="text" id="sched_last_name" name="last_name" placeholder="e.g. Smith" autocomplete="family-name">
+            </div>
+          </div>
+          <div class="help">Search for a player on the USTA NorCal website by name.</div>
+        </div>
+        <div id="profile-input" class="hidden">
           <label for="profile_url">Player profile URL</label>
           <input type="url" id="profile_url" name="profile_url" placeholder="https://leagues.ustanorcal.com/...playermatches.asp?id=...">
           <div class="help">Enter your USTA NorCal player profile URL to auto-discover teams.</div>
@@ -234,9 +261,37 @@ HTML_TEMPLATE = """
       <h2>Player Statistics</h2>
       <p>View comprehensive career statistics extracted from your USTA NorCal player profile.</p>
       <form id="stats-form" method="post" action="/analyze">
-        <label for="profile_url_stats">Player profile URL</label>
-        <input type="url" id="profile_url_stats" name="profile_url" placeholder="https://leagues.ustanorcal.com/...playermatches.asp?id=..." required>
-        <div class="help">Enter your USTA NorCal player profile URL to extract career statistics.</div>
+        <fieldset style="border:none; padding:0; margin:0 0 1rem 0;">
+          <legend style="font-weight:600; margin-bottom:0.5rem;">Input Method</legend>
+          <div style="display:flex; flex-direction:column; gap:0.5rem;">
+            <label class="radio-label">
+              <input type="radio" name="mode" value="search" onchange="toggleStatsMode()" checked> Search by name
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="mode" value="profile" onchange="toggleStatsMode()"> Profile URL
+            </label>
+          </div>
+        </fieldset>
+
+        <div id="stats-search-input">
+          <div class="name-search-row">
+            <div>
+              <label for="stats_first_name">First name (optional if last name given)</label>
+              <input type="text" id="stats_first_name" name="first_name" placeholder="e.g. John" autocomplete="given-name">
+            </div>
+            <div>
+              <label for="stats_last_name">Last name (optional if first name given)</label>
+              <input type="text" id="stats_last_name" name="last_name" placeholder="e.g. Smith" autocomplete="family-name">
+            </div>
+          </div>
+          <div class="help">Search for a player on the USTA NorCal website by name.</div>
+        </div>
+
+        <div id="stats-profile-input" class="hidden">
+          <label for="profile_url_stats">Player profile URL</label>
+          <input type="url" id="profile_url_stats" name="profile_url" placeholder="https://leagues.ustanorcal.com/...playermatches.asp?id=...">
+          <div class="help">Enter your USTA NorCal player profile URL to extract career statistics.</div>
+        </div>
         <button type="submit">Analyze</button>
       </form>
       <button class="clear-button" onclick="clearAll()">Go Back</button>
@@ -274,6 +329,15 @@ HTML_TEMPLATE = """
       showGoBackButtons();
       
       window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function clearSearchResults() {
+      document.getElementById('schedule-results').classList.add('hidden');
+      document.getElementById('schedule-results').innerHTML = '';
+      showGoBackButtons();
+      setTimeout(function() {
+        document.getElementById('schedule-section').scrollIntoView({ behavior: 'smooth' });
+      }, 100);
     }
 
     function hideGoBackButtons() {
@@ -389,29 +453,128 @@ HTML_TEMPLATE = """
     }
 
     function toggleMode() {
-      var mode = document.querySelector('input[name="mode"]:checked').value;
+      var mode = document.querySelector('#schedule-form input[name="mode"]:checked');
+      if (!mode) return;
+      var searchInput  = document.getElementById('search-input');
       var profileInput = document.getElementById('profile-input');
-      var teamsInput = document.getElementById('teams-input');
-      if (mode === 'profile') {
+      var teamsInput   = document.getElementById('teams-input');
+      var submitBtn    = document.querySelector('#schedule-form button[type="submit"]');
+      
+      searchInput.classList.add('hidden');
+      profileInput.classList.add('hidden');
+      teamsInput.classList.add('hidden');
+      if (mode.value === 'search') {
+        searchInput.classList.remove('hidden');
+        if (submitBtn) submitBtn.textContent = 'Search';
+      } else if (mode.value === 'profile') {
         profileInput.classList.remove('hidden');
-        teamsInput.classList.add('hidden');
+        if (submitBtn) submitBtn.textContent = 'Next';
       } else {
-        profileInput.classList.add('hidden');
         teamsInput.classList.remove('hidden');
+        if (submitBtn) submitBtn.textContent = 'Next';
+      }
+    }
+
+    function toggleStatsMode() {
+      var mode = document.querySelector('#stats-form input[name="mode"]:checked');
+      if (!mode) return;
+      var searchInput  = document.getElementById('stats-search-input');
+      var profileInput = document.getElementById('stats-profile-input');
+      var submitBtn    = document.querySelector('#stats-form button[type="submit"]');
+      searchInput.classList.add('hidden');
+      profileInput.classList.add('hidden');
+      if (mode.value === 'search') {
+        searchInput.classList.remove('hidden');
+        if (submitBtn) submitBtn.textContent = 'Search';
+      } else {
+        profileInput.classList.remove('hidden');
+        if (submitBtn) submitBtn.textContent = 'Analyze';
       }
     }
 
     document.addEventListener('DOMContentLoaded', function() {
       toggleMode();
+      toggleStatsMode();
 
       document.getElementById('schedule-form').addEventListener('submit', function(e) {
         e.preventDefault();
-        submitFormAjax(this, 'schedule-results');
+        var modeEl = document.querySelector('#schedule-form input[name="mode"]:checked');
+        if (modeEl && modeEl.value === 'search') {
+          // For search mode, POST to /search_player and display results in schedule-results
+          var firstName = (document.getElementById('sched_first_name').value || '').trim();
+          var lastName  = (document.getElementById('sched_last_name').value  || '').trim();
+          if (!firstName && !lastName) {
+            alert('Please enter at least a first name or last name to search.');
+            return;
+          }
+          setFormLoadingState(this, true, 'Searching...');
+          showLoadingMessage('schedule-results', 'Searching USTA NorCal for "' + firstName + ' ' + lastName + '"... please wait.');
+          var fd = new FormData();
+          fd.append('first_name', firstName);
+          fd.append('last_name',  lastName);
+          fetch('/search_player', {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            body: fd
+          })
+          .then(function(r) { return r.text(); })
+          .then(function(html) {
+            var container = document.getElementById('schedule-results');
+            container.innerHTML = html;
+            container.classList.remove('hidden');
+            hideGoBackButtons();
+            setTimeout(function() { container.scrollIntoView({ behavior: 'smooth' }); }, 100);
+            attachResultFormHandlers();
+            setFormLoadingState(document.getElementById('schedule-form'), false);
+          })
+          .catch(function(err) {
+            setFormLoadingState(document.getElementById('schedule-form'), false);
+            alert('Search failed: ' + err.message);
+          });
+        } else {
+          submitFormAjax(this, 'schedule-results');
+        }
       });
 
       document.getElementById('stats-form').addEventListener('submit', function(e) {
         e.preventDefault();
-        submitFormAjax(this, 'stats-results');
+        var modeEl = document.querySelector('#stats-form input[name="mode"]:checked');
+        if (modeEl && modeEl.value === 'search') {
+          // For search mode, POST to /search_player_stats and display results in stats-results
+          var firstName = (document.getElementById('stats_first_name').value || '').trim();
+          var lastName  = (document.getElementById('stats_last_name').value  || '').trim();
+          if (!firstName && !lastName) {
+            alert('Please enter at least a first name or last name to search.');
+            return;
+          }
+          setFormLoadingState(this, true, 'Searching...');
+          showLoadingMessage('stats-results', 'Searching USTA NorCal for "' + firstName + ' ' + lastName + '"... please wait.');
+          var fd = new FormData();
+          fd.append('first_name', firstName);
+          fd.append('last_name',  lastName);
+          fd.append('caller', 'stats');
+          fetch('/search_player_stats', {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            body: fd
+          })
+          .then(function(r) { return r.text(); })
+          .then(function(html) {
+            var container = document.getElementById('stats-results');
+            container.innerHTML = html;
+            container.classList.remove('hidden');
+            hideGoBackButtons();
+            setTimeout(function() { container.scrollIntoView({ behavior: 'smooth' }); }, 100);
+            attachResultFormHandlers();
+            setFormLoadingState(document.getElementById('stats-form'), false);
+          })
+          .catch(function(err) {
+            setFormLoadingState(document.getElementById('stats-form'), false);
+            alert('Search failed: ' + err.message);
+          });
+        } else {
+          submitFormAjax(this, 'stats-results');
+        }
       });
     });
   </script>
@@ -511,6 +674,28 @@ def generate():
     if isinstance(result, dict):
         return render_template_string(HTML_TEMPLATE, **result)
 
+    return result
+
+
+@app.route('/search_player', methods=['POST'])
+def search_player():
+    if not schedule_module:
+        return '<div class="status error">Schedule app module not available.</div>'
+    result = schedule_module.search_player_by_name()
+    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+    if isinstance(result, str) and is_ajax:
+        return _extract_results_only(result)
+    return result
+
+
+@app.route('/search_player_stats', methods=['POST'])
+def search_player_stats():
+    if not stats_module:
+        return '<div class="status error">Stats app module not available.</div>'
+    result = stats_module.search_player_by_name_stats()
+    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+    if isinstance(result, str) and is_ajax:
+        return _extract_results_only(result)
     return result
 
 

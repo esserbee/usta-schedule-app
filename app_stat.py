@@ -9,8 +9,10 @@ from flask import Flask, render_template_string, request
 
 app = Flask(__name__)
 
+USTA_SEARCH_URL = 'https://leagues.ustanorcal.com/search.asp'
 
 HTML_TEMPLATE = """<!doctype html>
+{% set mode = mode if mode is defined else 'search' %}
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -43,6 +45,21 @@ HTML_TEMPLATE = """<!doctype html>
     .stats-table .grand-total td { border-top: 2px solid #01696f; }
     .help { font-size: 0.9rem; color: #666; margin-top: -0.5rem; margin-bottom: 1rem; }
     .loading { margin-top: 1rem; padding: 0.85rem 1rem; border: 1px solid #cfe5e7; background: #eef8f9; border-radius: 4px; color: #014e54; font-weight: 600; }
+    .name-search-row { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+    .name-search-row > div { flex: 1; min-width: 160px; }
+    .radio-label { display: flex; align-items: center; gap: 0.5rem; font-weight: normal; cursor: var(--tennis-cursor); }
+    .radio-label input { width: auto; margin: 0; }
+    .profile-results-list { list-style: none; padding: 0; margin: 0.75rem 0; }
+    .profile-results-list li { margin-bottom: 0.5rem; }
+    .profile-results-list label { font-weight: 400; display: flex !important; align-items: flex-start; gap: 0.5rem; cursor: pointer; padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid #e0e0e0; background: #fafafa; transition: background 0.15s; margin: 0; }
+    .profile-results-list label:hover { background: #eef8f9; border-color: #01696f; }
+    .profile-results-list input[type="radio"] { margin-top: 0.2rem; flex-shrink: 0; width: auto !important; padding: 0 !important; margin-bottom: 0 !important; }
+    .profile-results-list .profile-name { font-weight: 700; color: #01696f; }
+    .profile-results-list .profile-meta { font-size: 0.82rem; color: #666; }
+    .profile-results-list .profile-expired { color: #a12c2c; font-size: 0.78rem; font-style: italic; }
+    .expired-row { opacity: 0.65; }
+    .clear-button { background-color: transparent; border: 1px solid #01696f; color: #01696f; }
+    .clear-button:hover { background-color: #f0f8f8; }
 
     @media (max-width: 768px) {
       body { padding: 1rem; }
@@ -116,10 +133,39 @@ HTML_TEMPLATE = """<!doctype html>
         </div>
       </div>
 
-      <form method="post" action="/analyze">
-        <label for="profile_url">Player profile URL</label>
-        <input type="url" id="profile_url" name="profile_url" placeholder="https://leagues.ustanorcal.com/...playermatches.asp?id=..." value="{{ profile_url or '' }}" required>
-        <div class="help">Enter your USTA NorCal player profile URL to extract career statistics.</div>
+      <form id="main-generate-form" method="post" action="/analyze">
+        <fieldset style="border:none; padding:0; margin:0 0 1rem 0;">
+          <legend style="font-weight:600; margin-bottom:0.5rem;">Input Method</legend>
+          <div style="display:flex; flex-direction:column; gap:0.5rem;">
+            <label class="radio-label">
+              <input type="radio" name="mode" value="search" onchange="toggleModeInputs()" {% if mode == 'search' %}checked{% endif %}> Search by name
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="mode" value="profile" onchange="toggleModeInputs()" {% if mode == 'profile' %}checked{% endif %}> Player profile URL
+            </label>
+          </div>
+        </fieldset>
+
+        <div id="search-input" {% if mode != 'search' %}style="display:none;"{% endif %}>
+          <div class="name-search-row">
+            <div>
+              <label for="first_name">First name (optional if last name given)</label>
+              <input type="text" id="first_name" name="first_name" placeholder="e.g. John" value="{{ first_name or '' }}" autocomplete="given-name">
+            </div>
+            <div>
+              <label for="last_name">Last name (optional if first name given)</label>
+              <input type="text" id="last_name" name="last_name" placeholder="e.g. Smith" value="{{ last_name or '' }}" autocomplete="family-name">
+            </div>
+          </div>
+          <div class="help">Search for a player on the USTA NorCal website by name.</div>
+        </div>
+
+        <div id="profile-input" {% if mode != 'profile' %}style="display:none;"{% endif %}>
+          <label for="profile_url">Player profile URL</label>
+          <input type="url" id="profile_url" name="profile_url" placeholder="https://leagues.ustanorcal.com/...playermatches.asp?id=..." value="{{ profile_url or '' }}">
+          <div class="help">Enter your USTA NorCal player profile URL to extract career statistics.</div>
+        </div>
+        
         <button type="submit">Analyze Statistics</button>
       </form>
 
@@ -132,6 +178,38 @@ HTML_TEMPLATE = """<!doctype html>
       {% endif %}
     </div>
   </div>
+
+  {% if profile_choices %}
+  <div class="results">
+    <div class="app-container">
+      <h2>Select your profile</h2>
+      <p class="embedded-intro-copy">Found {{ profile_choices | length }} result(s) for <strong>{{ search_query }}</strong>. Select the correct profile below.</p>
+      <form id="profile-select-form" method="post" action="/analyze">
+        <fieldset style="border:none; padding:0; margin:0;">
+          <input type="hidden" name="mode" value="profile">
+          <ul class="profile-results-list">
+          {% for p in profile_choices %}
+            <li class="{% if p.expired %}expired-row{% endif %}">
+              <label>
+                <input type="radio" name="profile_url" value="{{ p.url }}" {% if loop.first and not p.expired %}checked{% endif %}>
+                <span>
+                  <span class="profile-name">{{ p.name }}</span>
+                  {% if p.city %}<span class="profile-meta"> &mdash; {{ p.city }}</span>{% endif %}
+                  {% if p.usta_number %}<span class="profile-meta"> &middot; USTA #{{ p.usta_number }}</span>{% endif %}
+                  {% if p.expired %}<span class="profile-expired"> (membership expired {{ p.expiration }})</span>{% endif %}
+                </span>
+              </label>
+            </li>
+          {% endfor %}
+          </ul>
+          <button type="submit">Analyze This Profile</button>
+          <button type="button" class="clear-button" onclick="window.location.href='/';" style="margin-left: 1rem;">Search Another Name</button>
+          <div id="profile-select-loading" class="loading" style="display:none;" aria-live="polite">Loading profile... please wait.</div>
+        </fieldset>
+      </form>
+    </div>
+  </div>
+  {% endif %}
 
   {% if player_stats %}
   <div class="results">
@@ -218,24 +296,94 @@ HTML_TEMPLATE = """<!doctype html>
   {% endif %}
 
   <script>
-    const mainForm = document.querySelector('form[action="/analyze"]');
+    function toggleModeInputs() {
+      const mode = document.querySelector('input[name="mode"]:checked');
+      if (!mode) return;
+      const searchWrap = document.getElementById('search-input');
+      const profileWrap = document.getElementById('profile-input');
+      
+      searchWrap.style.display = 'none';
+      profileWrap.style.display = 'none';
+      
+      const submitBtn = document.querySelector('#main-generate-form button[type="submit"]');
 
+      if (mode.value === 'search') {
+        searchWrap.style.display = 'block';
+        if (submitBtn) submitBtn.textContent = 'Search';
+      } else {
+        profileWrap.style.display = 'block';
+        if (submitBtn) submitBtn.textContent = 'Analyze';
+      }
+    }
+    
+    // Call immediately to set initial state (covers document.write re-rendering)
+    toggleModeInputs();
+    document.addEventListener('DOMContentLoaded', toggleModeInputs);
+
+    const mainForm = document.getElementById('main-generate-form');
     if (mainForm) {
       mainForm.addEventListener('submit', function(e) {
-        e.preventDefault();
-        const loading = document.getElementById('loading-message');
-        const submitButton = mainForm.querySelector('button[type="submit"]');
+        const mode = document.querySelector('input[name="mode"]:checked');
+        if (mode && mode.value === 'search') {
+          e.preventDefault();
+          const firstName = document.getElementById('first_name').value.trim();
+          const lastName = document.getElementById('last_name').value.trim();
+          if (!firstName && !lastName) {
+            alert('Please enter at least a first name or last name to search.');
+            return;
+          }
+          const btn = mainForm.querySelector('button[type="submit"]');
+          if (btn) { btn.disabled = true; btn.textContent = 'Searching...'; }
+          const loadingEl = document.getElementById('loading-message');
+          if (loadingEl) {
+            loadingEl.textContent = 'Searching for player... please wait.';
+            loadingEl.style.display = 'block';
+          }
+          const fd = new FormData();
+          fd.append('first_name', firstName);
+          fd.append('last_name', lastName);
+          fetch('/search_player_stats', { method: 'POST', body: fd })
+            .then(r => r.text())
+            .then(html => {
+              document.open();
+              document.write(html);
+              document.close();
+            })
+            .catch(err => {
+              if (btn) { btn.disabled = false; btn.textContent = 'Analyze Statistics'; }
+              if (loadingEl) loadingEl.style.display = 'none';
+              alert('Search failed: ' + err.message);
+            });
+        } else {
+          e.preventDefault();
+          const loading = document.getElementById('loading-message');
+          const submitButton = mainForm.querySelector('button[type="submit"]');
+          if (loading) {
+            loading.textContent = 'Analyzing player statistics... please wait.';
+            loading.style.display = 'block';
+          }
+          if (submitButton) {
+            submitButton.dataset.originalText = submitButton.textContent;
+            submitButton.disabled = true;
+            submitButton.textContent = 'Analyzing...';
+          }
+          setTimeout(function() { mainForm.submit(); }, 50);
+        }
+      });
+    }
 
+    const profileSelectForm = document.getElementById('profile-select-form');
+    if (profileSelectForm) {
+      profileSelectForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const loading = document.getElementById('profile-select-loading');
+        const submitButton = profileSelectForm.querySelector('button[type="submit"]');
         if (loading) loading.style.display = 'block';
         if (submitButton) {
-          submitButton.dataset.originalText = submitButton.textContent;
           submitButton.disabled = true;
           submitButton.textContent = 'Analyzing...';
         }
-
-        setTimeout(function() {
-          mainForm.submit();
-        }, 50);
+        setTimeout(function() { profileSelectForm.submit(); }, 100);
       });
     }
   </script>
@@ -498,9 +646,163 @@ def compute_player_statistics(all_matches, player_name):
     return stats_by_year, grand_total
 
 
+def search_player_by_name_stats():
+    first_name = request.form.get('first_name', '').strip()
+    last_name  = request.form.get('last_name', '').strip()
 
+    if not first_name and not last_name:
+        return render_template_string(
+            HTML_TEMPLATE,
+            message='Please enter a first name and/or last name to search.',
+            error=True,
+            mode='search',
+            first_name=first_name,
+            last_name=last_name,
+            profile_choices=None,
+            search_query='',
+            profile_url='',
+            player_stats=None,
+            player_name=None,
+            team_details=None,
+        )
+
+    # Build query string — USTA NorCal search works best with "Last, First"
+    if last_name and first_name:
+        search_text = f"{last_name}, {first_name}"
+    elif last_name:
+        search_text = last_name
+    elif first_name:
+        # Trick to search by first name only on this legacy site
+        search_text = f", {first_name}"
+    else:
+        search_text = ""
+        
+    search_query = search_text.strip(', ') if search_text else ''
+
+    try:
+        session = requests.Session()
+        session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
+        get_resp = session.get(USTA_SEARCH_URL, timeout=15)
+        get_resp.raise_for_status()
+        get_soup = BeautifulSoup(get_resp.text, 'html.parser')
+        
+        token = ''
+        token_input = get_soup.find('input', {'name': 'token'})
+        if token_input and token_input.get('value'):
+            token = token_input.get('value')
+            
+        post_data = {
+            'lstsearch': '2',
+            'searchfor': '2',
+            'name': search_text,
+            'cmd': ' Search '
+        }
+        if token:
+            post_data['token'] = token
+            
+        resp = session.post(USTA_SEARCH_URL, data=post_data, timeout=15)
+        resp.raise_for_status()
+    except Exception as e:
+        return render_template_string(
+            HTML_TEMPLATE,
+            message=f'Error contacting USTA NorCal search: {e}',
+            error=True,
+            mode='search',
+            first_name=first_name,
+            last_name=last_name,
+            profile_choices=None,
+            search_query=search_query,
+            profile_url='',
+            player_stats=None,
+            player_name=None,
+            team_details=None,
+        )
+
+    soup = BeautifulSoup(resp.text, 'html.parser')
+    
+    # Exact logic from app_schedule.py to prevent differences
+    profile_choices = []
+    seen_urls = set()
+    for a in soup.find_all('a', href=True):
+        href = a['href']
+        if 'playermatches.asp' not in href.lower():
+            continue
+        full_url = urljoin(USTA_SEARCH_URL, href)
+        if full_url in seen_urls:
+            continue
+        seen_urls.add(full_url)
+
+        row = a.find_parent('tr')
+        name = a.get_text(' ', strip=True)
+        city = ''
+        usta_number = ''
+        expiration = ''
+        expired = False
+
+        if row:
+            tds = row.find_all('td')
+            cells = [td.get_text(' ', strip=True) for td in tds]
+            if cells:
+                name = cells[0] if cells[0] else name
+            if len(cells) >= 2:
+                city = cells[1]
+            if len(cells) >= 3:
+                usta_number = cells[2]
+            if len(cells) >= 4:
+                expiration = cells[3]
+                try:
+                    exp_dt = datetime.strptime(expiration, '%m/%d/%Y')
+                    if exp_dt < datetime.now():
+                        expired = True
+                except Exception:
+                    pass
+
+        profile_choices.append({
+            'url': full_url,
+            'name': name,
+            'city': city,
+            'usta_number': usta_number,
+            'expiration': expiration,
+            'expired': expired,
+        })
+
+    if not profile_choices:
+        return render_template_string(
+            HTML_TEMPLATE,
+            message=f'No players found matching "{search_query}". Try a different spelling or use the profile URL directly.',
+            error=True,
+            mode='search',
+            first_name=first_name,
+            last_name=last_name,
+            profile_choices=None,
+            search_query=search_query,
+            profile_url='',
+            player_stats=None,
+            player_name=None,
+            team_details=None,
+        )
+
+    return render_template_string(
+        HTML_TEMPLATE,
+        message=None,
+        error=False,
+        mode='search',
+        first_name=first_name,
+        last_name=last_name,
+        profile_choices=profile_choices,
+        search_query=search_query,
+        profile_url='',
+        player_stats=None,
+        player_name=None,
+        team_details=None,
+    )
 
 def stats_analyze():
+    mode = request.form.get('mode', 'profile')
+    
+    if mode == 'search':
+        return search_player_by_name_stats()
+        
     profile_url = request.form.get('profile_url', '').strip()
     
     if not profile_url:
@@ -590,6 +892,11 @@ def index():
 @app.route('/analyze', methods=['POST'])
 def analyze():
     return stats_analyze()
+
+
+@app.route('/search_player_stats', methods=['POST'])
+def search_player_stats_route():
+    return search_player_by_name_stats()
 
 
 if __name__ == '__main__':
